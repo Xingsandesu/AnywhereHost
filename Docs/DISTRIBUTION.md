@@ -58,3 +58,18 @@ and both embedded executables pass signature verification. The archived Rust
 executable passes the 34 HTTPS/WSS integration checks with isolated test data;
 the Rust suite, Clippy and Swift package build also pass. The ICNS decodes to all
 ten required pixel representations, including the 1024-pixel image.
+
+## TestFlight validation
+
+On 2026-10-28, Apple created app record `6827936120` for
+`com.jintongshu.AnywhereHost`. Uploading `0.1.0 (1)` with the existing Xcode
+account reached server validation and failed with **App sandbox not enabled**.
+The rejection names all three executables: `AnywhereHost`, `anywhere-host`, and
+`frpc`. Signing and account authentication are working; this build is not
+available in TestFlight.
+
+The app's use of the installed Codex runtime, Codex Home, project files, and
+spawned tools needs a tested App Sandbox design before another TestFlight
+attempt. Adding the entitlement alone does not establish that those workflows
+continue to work. Apple also reported missing dSYMs for the Rust and frpc
+executables as symbol-upload warnings.
