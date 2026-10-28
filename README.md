@@ -1,15 +1,14 @@
 # Anywhere Host
 
-独立的 macOS Codex 主机应用：**Rust 后端 + SwiftUI 控制台 + 内置 frpc**，交付一个 `AnywhereHost.app`。面向 iPhone Duo 的原生远程开发体验提供结构化 API，与 cc-connect 完全独立。
+macOS Codex 主机应用：**Rust 后端 + SwiftUI 控制台 + 内置 frpc**，交付一个 `AnywhereHost.app`，为 iPhone Duo 的远程开发体验提供结构化 API。
 
 ## 产品边界
 
 - iPhone Duo 是工作界面，Mac 是执行主机；会话、项目、上下文和执行结果以主机 Codex 为准。
 - Codex App 优先，独立 CLI 次之。复用原有 `CODEX_HOME`、登录、配置、技能、工作目录和线程 ID；不复制一个新的 Codex 用户环境。
 - 创建项目、恢复会话、选模型、压缩上下文、审批和停止都是协议操作，不依赖 `/model`、`/stop` 或对提示词做命令解析。
-- cc-connect 留在原 iPhone 客户端作为二级兼容路径。这个仓库没有它的运行或构建依赖。
 
-**0.1 是可运行的 Host 基础版本，不代表 iPhone 和桌面已完全对齐。** iPhone 客户端已接入 Host v1：支持多电脑、多工作区、原生会话/模型/上下文/审批及文件界面；已有 cc-connect 链接与 Host 链接不能互换。详见旁边客户端工程的 `Docs/HostClient.md`。
+**0.1 是可运行的 Host 基础版本，不代表 iPhone 和桌面已完全对齐。** iPhone 客户端通过 Host v1 支持多电脑、多工作区、原生会话/模型/上下文/审批及文件界面。详见旁边客户端工程的 `Docs/HostClient.md`。
 
 ## 运行
 

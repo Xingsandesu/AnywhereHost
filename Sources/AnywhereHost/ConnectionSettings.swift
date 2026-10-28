@@ -56,7 +56,7 @@ struct ConnectionSettings: View {
                     Image(nsImage: qr).interpolation(.none).resizable().scaledToFit().frame(width: 180, height: 180).padding(10).background(.white)
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Anywhere Host · 协议 v1").font(.headline)
-                        Text("包含 HTTPS 地址、访问令牌和证书指纹。旧版 cc-connect 客户端暂不识别此链接。").foregroundStyle(.secondary)
+                        Text("包含 HTTPS 地址、访问令牌和证书指纹。请在 iPhone 的 Anywhere 中导入。").foregroundStyle(.secondary)
                         Button("复制连接链接") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }
                     }
                 }

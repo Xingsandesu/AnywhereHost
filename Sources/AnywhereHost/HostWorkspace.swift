@@ -89,8 +89,6 @@ struct HostOverview: View {
                     StatusMetric(title: "隧道", value: store.tunnel["state"].string ?? "stopped", symbol: "network")
                 }
                 Button("设置远程连接", systemImage: "qrcode") { showConnection = true }.buttonStyle(.borderedProminent).controlSize(.large)
-                Text("已有 iPhone 客户端仍使用 cc-connect。新的 Host API 已独立提供，客户端接入将在新协议适配中完成。")
-                    .font(.caption).foregroundStyle(.secondary)
             }.padding(36).frame(maxWidth: 800, alignment: .leading)
         }
     }

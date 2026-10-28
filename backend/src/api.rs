@@ -96,7 +96,7 @@ async fn capabilities(State(s): State<Arc<AppState>>) -> Json<Value> {
         .filter(|m| c.as_ref().is_some_and(|c| c.runtime.methods.contains(**m)))
         .collect();
     Json(
-        json!({"protocolVersion":1,"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process","ccConnect":false}),
+        json!({"protocolVersion":1,"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
     )
 }
 // Exposes the same mutation gate used by RPC policy, so clients can offer a native fork action.

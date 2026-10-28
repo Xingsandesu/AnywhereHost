@@ -1,6 +1,6 @@
 # AnywhereHost engineering constraints
 
-- This is a separate project from AnyWhereCoding. Do not introduce cc-connect as a runtime, build, data or protocol dependency.
+- This project provides the self-hosted backend for AnyWhereCoding through the native Host protocol.
 - Product target: full native iPhone Duo remote Codex experience, with this Mac providing structured APIs and real host state.
 - Prefer installed Codex App/shared process integration; installed CLI is fallback. Preserve actual Codex Home, project/thread IDs, cwd and configuration. Never claim a new app-server process controls the current desktop process.
 - No slash-command parsing, prompt-generated control actions, or shell command strings from remote clients. Use protocol methods and explicit resource APIs.

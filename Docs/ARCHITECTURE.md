@@ -1,10 +1,10 @@
 # Architecture and delivery plan
 
-## Direction recorded on 2026-10-28
+## Product architecture
 
-AnywhereHost is the primary backend for the future iPhone Duo experience. cc-connect remains secondary support in the existing client: preserve current features, accept targeted compatibility fixes, and stop expanding its protocol to emulate desktop functionality. New product capabilities belong in this independent Host protocol and the native iPhone client adapter.
+AnywhereHost is the self-hosted backend for the iPhone Duo client. The Host protocol provides native Codex operations, structured workspace resources, and live execution state to the iPhone app.
 
-The macOS deliverable is one application bundle containing a SwiftUI executable, a Rust service, and pinned upstream frpc. Modular source files are intentional. The user's installed Codex is an external runtime, never a bundled fork, API-key reimplementation, or cc-connect dependency.
+The macOS deliverable is one application bundle containing a SwiftUI executable, a Rust service, and pinned upstream frpc. The user's installed Codex provides the external runtime.
 
 ## Components
 
@@ -56,7 +56,7 @@ The application stops only its own backend, frpc and app-server children. An OS 
 | Skills/plugins | Read/list RPC where available; inherited runtime config | Management UX, desktop-only injected plugin compatibility |
 | Remote connectivity | Bundled frpc, pinned TLS, connection QR, local frps round trip tested | User frps deployment and real WAN/device validation, pairing codes, device revocation |
 | macOS packaging | Single native-architecture .app, local signing | Developer ID, notarization, universal binary, updater, login lifecycle |
-| iPhone Duo | Host v1 adapter, multi-computer/workspace SwiftUI, foreground Live Activity; legacy client isolated | APNs updates, uploads, worktrees, comprehensive parity and WAN validation |
+| iPhone Duo | Host v1 client, multi-computer/workspace SwiftUI, foreground Live Activity | APNs updates, uploads, worktrees, comprehensive parity and WAN validation |
 
 A capability listed as an RPC is implemented as a gated native protocol operation; it is not a claim that every corresponding SwiftUI screen or every runtime version has been end-to-end validated.
 
