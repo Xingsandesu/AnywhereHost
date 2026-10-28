@@ -172,9 +172,14 @@ async fn rpc(State(s): State<Arc<AppState>>, Json(mut call): Json<RpcCall>) -> J
     if call.method == "thread/list" && call.params.get("sourceKinds").is_none() {
         call.params["sourceKinds"] = json!(["cli", "vscode", "appServer", "exec"]);
     }
-    // Inherited host policies are kept intact. No sandbox/approval overrides are injected.
+    // The signed macOS service is already sandboxed. Preserve approval policy and
+    // reject incompatible explicit sandbox requests instead of weakening them.
+    let app_sandbox = c.runtime.execution_sandbox == "macOSAppSandbox";
+    if app_sandbox && let Err(e) = crate::app_sandbox::prepare(&call.method, &mut call.params) {
+        return rpc_reply(Err(e));
+    }
     let result = c.request(&call.method, call.params.clone()).await;
-    let result = crate::history::normalize(&call.method, &call.params, result);
+    let mut result = crate::history::normalize(&call.method, &call.params, result);
     if matches!(call.method.as_str(), "thread/start" | "thread/fork")
         && let Ok(value) = &result
         && let Some(id) = value.pointer("/thread/id").and_then(Value::as_str)
@@ -184,6 +189,28 @@ async fn rpc(State(s): State<Arc<AppState>>, Json(mut call): Json<RpcCall>) -> J
             -32603,
             format!("Thread created but ownership persistence failed: {e}"),
         )));
+    }
+    if app_sandbox
+        && matches!(
+            call.method.as_str(),
+            "thread/start" | "thread/fork" | "thread/resume"
+        )
+        && let Ok(value) = &mut result
+        && let Some(id) = value.pointer("/thread/id").and_then(Value::as_str)
+    {
+        let policy = crate::app_sandbox::policy();
+        if let Err(e) = c
+            .request(
+                "thread/settings/update",
+                json!({"threadId":id,"sandboxPolicy":policy}),
+            )
+            .await
+        {
+            return rpc_reply(Err(e));
+        }
+        // Reflect the confirmed native policy in the creation/resume response.
+        value["sandbox"] = policy;
+        value["activePermissionProfile"] = Value::Null;
     }
     rpc_reply(result)
 }

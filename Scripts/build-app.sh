@@ -8,9 +8,9 @@ xcodebuild -project AnywhereHost.xcodeproj -scheme AnywhereHost -configuration R
 APP="$ROOT/dist/AnywhereHost.app"
 mkdir -p "$ROOT/dist"
 ditto "$ROOT/.build/xcode/Build/Products/Release/AnywhereHost.app" "$APP"
-for binary in AnywhereHost anywhere-host frpc; do
-  codesign --force --sign "${ANYWHERE_SIGNING_IDENTITY:--}" "$APP/Contents/MacOS/$binary"
+for binary in anywhere-host frpc; do
+  codesign --force --options runtime --entitlements Resources/InheritedSandbox.entitlements --sign "${ANYWHERE_SIGNING_IDENTITY:--}" "$APP/Contents/MacOS/$binary"
 done
-codesign --force --sign "${ANYWHERE_SIGNING_IDENTITY:--}" "$APP"
+codesign --force --options runtime --entitlements Resources/AnywhereHost.entitlements --sign "${ANYWHERE_SIGNING_IDENTITY:--}" "$APP"
 codesign --verify --deep --strict "$APP"
 printf 'Built %s\n' "$APP"

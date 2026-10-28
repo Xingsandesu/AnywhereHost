@@ -16,7 +16,7 @@ struct HostWorkspace: View {
             else { HostOverview(store: store, showConnection: $showConnection) }
         }
         .toolbar {
-            ToolbarItem { Label(store.connected ? "主机在线" : "连接中", systemImage: store.connected ? "circle.fill" : "circle.dotted").foregroundStyle(store.connected ? .green : .secondary).font(.caption) }
+            ToolbarItem { Label(store.connected ? "主机在线" : store.permissions.homeAuthorized ? "主机离线" : "等待授权", systemImage: store.connected ? "circle.fill" : "circle.dotted").foregroundStyle(store.connected ? .green : .secondary).font(.caption) }
             ToolbarItem { Button("连接 iPhone", systemImage: "qrcode") { showConnection = true } }
         }
         .sheet(isPresented: $showConnection) { ConnectionSettings(store: store) }
@@ -82,6 +82,7 @@ struct HostOverview: View {
                 Text("你的 Mac，随身可达。", comment: "Host welcome heading").font(.largeTitle.bold())
                 Text("为 iPhone Duo 提供项目、会话、上下文和执行状态。所有工作都在这台 Mac 的 Codex 环境中完成。")
                     .font(.title3).foregroundStyle(.secondary)
+                HostPermissionsView(store: store)
                 RuntimeStatusCard(store: store)
                 HStack(spacing: 24) {
                     StatusMetric(title: "主机项目", value: String(store.projects.count), symbol: "folder")
@@ -99,15 +100,19 @@ struct RuntimeStatusCard: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Codex 连接", systemImage: "desktopcomputer").font(.headline)
             HStack { Text("运行方式").foregroundStyle(.secondary); Spacer(); Text(store.runtimeLabel) }
+            if store.status["runtime"]["executionSandbox"].string == "macOSAppSandbox" {
+                Text("执行权限：macOS 应用沙盒。Codex 可以读写已授权目录并联网；命令审批仍由 Codex 配置决定。")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             HStack(alignment: .top) {
                 Text("Codex Home").foregroundStyle(.secondary)
                 Spacer()
-                Text(verbatim: store.status["runtime"]["codexHome"].string ?? "检测中").font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                Text(verbatim: store.status["runtime"]["codexHome"].string ?? store.permissions.userHome.appending(path: ".codex").path).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
             }
-            Text(store.status["runtime"]["note"].string ?? store.status["error"].string ?? "正在连接主机 Codex…")
+            Text(store.status["runtime"]["note"].string ?? store.status["error"].string ?? (store.permissions.homeAuthorized ? "正在连接主机 Codex…" : "授权主目录后连接现有 Codex。"))
                 .font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
             if !store.connected {
-                Button("重新连接 Codex") { Task { await store.perform { _ = try await store.client?.request("v1/runtime/connect", body: .object([:])); await store.refresh() } } }.disabled(store.busy)
+                Button("重新连接 Codex") { Task { await store.perform { _ = try await store.client?.request("v1/runtime/connect", body: .object([:])); await store.refresh() } } }.disabled(store.busy || store.client == nil)
             }
         }
         .padding(20).frame(maxWidth: .infinity, alignment: .leading)

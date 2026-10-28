@@ -31,6 +31,7 @@ struct PendingRequest: Identifiable, Sendable { let id: String; let method: Stri
 @MainActor @Observable
 final class HostStore {
     let process = HostProcess()
+    let permissions = HostPermissions()
     var client: HostClient?
     var status: JSONValue = .null
     var tunnel: JSONValue = .null
@@ -75,10 +76,10 @@ final class HostStore {
         do { try await operation() } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     func start() async {
-        guard !isStarting, client == nil else { return }
+        guard !isStarting, client == nil, permissions.homeAuthorized else { return }
         isStarting = true; defer { isStarting = false }
         do {
-            try process.start()
+            try process.start(permissions: permissions)
             for _ in 0..<60 {
                 try await Task.sleep(for: .milliseconds(250))
                 guard process.isRunning else { throw HostFailure(message: "后端已退出，请查看主机日志。") }
@@ -172,6 +173,9 @@ final class HostStore {
         guard let client else { return }
         let picker = NSOpenPanel(); picker.canChooseDirectories = true; picker.canChooseFiles = false; picker.allowsMultipleSelection = false
         guard await picker.begin() == .OK, let url = picker.url else { return }
+        guard permissions.covers(url) else {
+            throw HostFailure(message: "该目录尚未授权给 Codex。请在主机首页停止主机，授权此文件夹后再启动。")
+        }
         let result = try await client.rpc("project/create", ["idempotencyKey": .string(UUID().uuidString), "name": .string(url.lastPathComponent), "roots": .array([.object(["path": .string(url.path)])])])
         selectedProject = result["project"]["id"].string
         await refresh()

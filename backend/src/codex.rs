@@ -26,6 +26,7 @@ pub struct Runtime {
     pub binary: PathBuf,
     pub codex_home: PathBuf,
     pub shares_live_process: bool,
+    pub execution_sandbox: String,
     pub methods: HashSet<String>,
     pub note: String,
 }
@@ -191,11 +192,24 @@ impl Codex {
         } else {
             "复用主机 Codex Home、登录、配置和历史；独立 app-server 进程。桌面已有会话可读取或分叉，不能直接接管，以免并发写入。"
         };
+        let app_sandbox = crate::app_sandbox::enabled() && !shared;
+        if app_sandbox {
+            ensure!(
+                methods.contains("thread/settings/update"),
+                "Installed Codex does not support App Sandbox execution policy; update Codex."
+            );
+        }
         let runtime = Runtime {
             mode: mode.into(),
             binary: binary.clone(),
             codex_home: config.codex_home.clone(),
             shares_live_process: shared,
+            execution_sandbox: if app_sandbox {
+                "macOSAppSandbox"
+            } else {
+                "codex"
+            }
+            .into(),
             methods,
             note: note.into(),
         };

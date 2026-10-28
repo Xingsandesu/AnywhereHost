@@ -1,4 +1,5 @@
 mod api;
+mod app_sandbox;
 mod codex;
 mod config;
 mod events;

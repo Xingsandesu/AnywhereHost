@@ -3,7 +3,7 @@
 - Bundle ID: `com.jintongshu.AnywhereHost`
 - Developer team: `775Y7KV7KU`
 - App Store Connect app: `6827936120`
-- Version: `0.1.0 (1)`
+- Version: `0.1.0 (2)`
 - Target: Apple Silicon, macOS 14 or later.
 
 `AnywhereHost.xcodeproj` builds the SwiftUI application and embeds the Rust Host,
@@ -47,9 +47,8 @@ asc xcode export --archive-path /tmp/AnywhereHost.xcarchive \
 
 The Apple account must have access to the app record and signing team. A local
 archive or signed package does not establish TestFlight availability; Apple must
-accept and process the upload. The Host currently runs outside App Sandbox to use
-the installed Codex runtime and workspace tools. Sandbox compatibility is a
-separate requirement for the App Store distribution path.
+accept and process the upload. The Host uses App Sandbox with persistent folder grants and the installed
+Codex runtime. See [sandbox setup and execution verification](SANDBOX.md).
 
 ## Validation
 
@@ -68,8 +67,23 @@ The rejection names all three executables: `AnywhereHost`, `anywhere-host`, and
 `frpc`. Signing and account authentication are working; this build is not
 available in TestFlight.
 
-The app's use of the installed Codex runtime, Codex Home, project files, and
-spawned tools needs a tested App Sandbox design before another TestFlight
-attempt. Adding the entitlement alone does not establish that those workflows
-continue to work. Apple also reported missing dSYMs for the Rust and frpc
-executables as symbol-upload warnings.
+Build `0.1.0 (2)` adds sandbox signatures for all three executables, persistent
+folder authorization, Full Disk Access guidance and native Codex external-sandbox
+execution. Its real command/file and frpc checks are recorded in [SANDBOX.md](SANDBOX.md).
+Upload acceptance and processing are recorded separately below. Apple also reported
+missing dSYMs for the Rust and frpc executables as symbol-upload warnings in build 1.
+
+
+## Build 2 upload result
+
+On 2026-10-28 at 21:28 CST, Xcode reported **Upload succeeded** and
+**EXPORT SUCCEEDED** for `com.jintongshu.AnywhereHost`, `0.1.0 (2)`.
+Apple accepted all three sandboxed executables and reported that the uploaded
+package had begun processing. This is upload acceptance, not confirmation that
+processing or tester availability has completed. The non-blocking Rust/frpc dSYM
+warnings remain.
+
+The archive is `AnywhereHost-TF-0.1.0-2.xcarchive` in the dated Xcode Archives
+directory; an adjacent `.upload.json` records the result and log location. It was
+built from the working tree, including the pre-existing tunnel changes. The
+sandbox commit is scoped to sandbox adaptation, signing, verification and docs.
