@@ -69,6 +69,8 @@ Native parameters and result schemas come from the installed Codex `app-server g
 
 A default thread list explicitly includes CLI, VS Code, app-server and exec sources; Codex's default interactive-source filter alone omits some desktop threads. `nextCursor` must be retained and requested; do not treat a first page as the complete workspace.
 
+Before the first user message, Codex can hold a new persistent thread only in memory. For `thread/turns/list` without a cursor, Host maps only the exact native `-32600` “not materialized yet … before first user message” error for the requested thread to `{"data":[],"nextCursor":null,"backwardsCursor":null,"historyState":"unmaterialized"}`. Missing threads, cursor errors and all other failures remain errors. This is an empty-history state, not a change to mutation permission. Read `/v1/threads/{id}/access` independently; do not classify a failed history read as read-only. Send the first `turn/start` directly on a newly started/unmaterialized thread: `thread/resume` can fail with “no rollout found” until its first message is persisted. Later turns on persisted threads can resume normally. No history response is cached; after the first message, the normal native page is returned.
+
 Host never injects default model, cwd for an existing thread, weakened sandbox, or replacement instructions. New threads require a real absolute cwd. In an independent runtime, existing foreign thread mutations return `-32009`; read history or fork, or attach to the actual shared process. `thread/resume` cannot override the rollout path or entire history. Host-created ownership is persisted locally, not a global exclusive lease.
 
 ## Events and reconnection

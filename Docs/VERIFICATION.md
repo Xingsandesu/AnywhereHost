@@ -1,5 +1,13 @@
 # Verification — 2026-10-28
 
+## Empty thread lifecycle regression
+
+- Reproduced the reported thread using read-only live calls: metadata exists, Host owns it and `canMutate:true`, but `thread/turns/list` reports the precise pre-first-message error. Existing user threads were not mutated.
+- The compatibility adapter converts only that error on a first page into empty history. Rust unit tests cover incorrect IDs, cursor reads, different methods, unrelated failures and successful-page pass-through.
+- `cargo test --locked`: 8 tests passed; clippy with `-D warnings` passed; `Scripts/verify-host.py`: 34 HTTPS/WSS integration checks passed; `swift build` passed. The standalone `.app` was rebuilt and its signature verified. The already-running production Host has not been restarted; client compatibility with its original error response is retained.
+- `Scripts/smoke-real-codex.py --first-message` explicitly creates a new persistent test thread in a temporary workspace using the installed App runtime. Metadata/access/empty-history read, direct first-message submission, real streamed reply and paginated persisted history passed. Only the newly created test thread was archived afterward. This is distinct from the default read-only smoke and the existing ephemeral `--inference` option.
+- Real protocol checks exposed an additional client bug: `thread/resume` before the first message fails because no rollout exists yet. The native iOS client now starts that first turn without resume; changing model settings also avoids premature resume.
+
 Environment: this Apple Silicon Mac, Swift 6 / installed Xcode SDK, Rust 1.99.1, Codex App runtime `0.162.0-alpha.2`, frpc/frps `0.71.1`.
 
 | Check | Result |
