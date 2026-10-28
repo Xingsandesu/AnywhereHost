@@ -1,0 +1,11 @@
+/target/
+/.build/
+/dist/
+/Resources/frpc
+/Resources/frps
+/Resources/frp-LICENSE
+/.DS_Store
+*.xcuserstate
+xcuserdata/
+__pycache__/
+*.pyc

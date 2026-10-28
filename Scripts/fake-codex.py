@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Deterministic protocol peer. Never reads real Codex files or contacts a model."""
+import json, os, pathlib, sys
+METHODS = ['initialize', 'project/list', 'project/read', 'thread/list', 'thread/start', 'thread/fork', 'thread/resume', 'thread/turns/list', 'turn/start', 'turn/interrupt', 'model/list']
+if 'generate-json-schema' in sys.argv:
+    directory = pathlib.Path(sys.argv[sys.argv.index('--out') + 1])
+    (directory / 'ClientRequest.json').write_text(json.dumps({'oneOf': [{'properties': {'method': {'enum': [m]}}} for m in METHODS]}))
+    sys.exit(0)
+
+def send(value):
+    print(json.dumps(value), flush=True)
+
+root = os.environ['CODEX_HOME']
+project = {'id': 'project-1', 'name': 'Fixture project', 'roots': [{'path': root}]}
+for line in sys.stdin:
+    req = json.loads(line)
+    if req.get('id') == 'approval-1' and 'result' in req:
+        send({'method': 'item/agentMessage/delta', 'params': {'threadId': 'owned-1', 'turnId': 'turn-1', 'itemId': 'item-1', 'delta': 'Approved fixture'}})
+        send({'method': 'turn/completed', 'params': {'threadId': 'owned-1', 'turn': {'id': 'turn-1', 'status': 'completed'}}})
+        continue
+    if 'id' not in req: continue
+    method = req['method']; p = req.get('params', {})
+    if method == 'initialize': result = {'userAgent': 'fixture/1', 'codexHome': root}
+    elif method == 'project/list': result = {'data': [project], 'nextCursor': None}
+    elif method == 'project/read': result = {'project': project}
+    elif method == 'thread/list':
+        assert 'appServer' in p['sourceKinds']
+        result = {'data': [{'id': 'desktop-1', 'name': 'Existing desktop thread', 'cwd': root}], 'nextCursor': None}
+    elif method in ('thread/start', 'thread/fork'): result = {'thread': {'id': 'owned-1', 'cwd': p.get('cwd', root)}}
+    elif method == 'thread/resume':
+        assert p['threadId'] == 'owned-1'
+        result = {'thread': {'id': 'owned-1'}, 'cwd': root, 'model': 'fixture'}
+    elif method == 'turn/start':
+        send({'id': req['id'], 'result': {'turn': {'id': 'turn-1', 'status': 'inProgress'}}})
+        send({'id': 'approval-1', 'method': 'item/commandExecution/requestApproval', 'params': {'threadId': 'owned-1', 'turnId': 'turn-1', 'command': 'fixture read only'}})
+        continue
+    elif method == 'thread/turns/list': result = {'data': [], 'nextCursor': None}
+    elif method == 'model/list': result = {'data': []}
+    else:
+        send({'id': req['id'], 'error': {'code': -32601, 'message': 'Unsupported fixture method'}})
+        continue
+    send({'id': req['id'], 'result': result})
