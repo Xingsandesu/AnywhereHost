@@ -53,15 +53,24 @@ with tempfile.TemporaryDirectory(prefix='anywhere-real-') as temp:
             files = request('/v1/projects/' + project['id'] + '/files')
             print('PASS rooted project files:', len(files['entries']), 'entries')
         print('PASS read-only real Codex smoke')
-        if '--inference' in sys.argv:
+        if '--inference' in sys.argv or '--first-message' in sys.argv:
             # Ephemeral thread avoids adding fixture conversations to the user's saved history.
-            created = rpc('thread/start', {'cwd': temp, 'ephemeral': True, 'approvalPolicy': 'never', 'sandbox': 'read-only'})
+            # --first-message explicitly exercises persistent history in a NEW
+            # disposable thread, then archives only that test-owned thread.
+            persistent = '--first-message' in sys.argv
+            created = rpc('thread/start', {'cwd': temp, 'ephemeral': not persistent, 'approvalPolicy': 'never', 'sandbox': 'read-only'})
             thread_id = created['thread']['id']
             from host_wire import WebSocket
             status = request('/v1/status')
             stream = WebSocket(port, (directory / 'access-token').read_text(), ssl.PEM_cert_to_DER_cert((directory / 'host-cert.pem').read_text()), f"?after={status['lastEventSequence']}&epoch={status['eventEpoch']}")
             stream.socket.settimeout(60)
             try:
+                if persistent:
+                    assert request('/v1/threads/' + thread_id + '/access')['canMutate']
+                    assert rpc('thread/read', {'threadId': thread_id})['thread']['id'] == thread_id
+                    before = rpc('thread/turns/list', {'threadId': thread_id, 'limit': 20, 'itemsView': 'full', 'sortDirection': 'desc'})
+                    assert before['data'] == [], before
+                    print('PASS real empty thread metadata/access/history before first message; no unnecessary resume')
                 turn = rpc('turn/start', {'threadId': thread_id, 'input': [{'type': 'text', 'text': 'Reply exactly ANYWHERE_HOST_OK. Do not call any tools or modify any files.'}]})
                 turn_id = turn['turn']['id']; texts = []
                 for _ in range(500):
@@ -71,10 +80,18 @@ with tempfile.TemporaryDirectory(prefix='anywhere-real-') as temp:
                     if event['method'] == 'turn/completed' and params['turn']['id'] == turn_id:
                         assert params['turn']['status'] == 'completed', params['turn'].get('error', params['turn']['status'])
                         assert 'ANYWHERE_HOST_OK' in ''.join(texts), 'Missing expected model reply'
-                        print('PASS real ephemeral Codex turn streamed and completed with expected reply')
+                        print('PASS real Codex turn streamed and completed with expected reply')
+                        if persistent:
+                            after = rpc('thread/turns/list', {'threadId': thread_id, 'limit': 20, 'itemsView': 'full'})
+                            assert any(t['id'] == turn_id for t in after['data']), 'First turn missing from materialized history'
+                            print('PASS real first turn is available through paginated history')
                         break
                 else: raise RuntimeError('Real inference timed out')
-            finally: stream.close()
+            finally:
+                stream.close()
+                if persistent:
+                    rpc('thread/archive', {'threadId': thread_id})
+                    print('PASS archived only the newly created regression thread')
     finally:
         process.terminate()
         try: process.wait(timeout=8)

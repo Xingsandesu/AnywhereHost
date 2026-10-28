@@ -2,6 +2,7 @@ mod api;
 mod codex;
 mod config;
 mod events;
+mod history;
 mod policy;
 mod tunnel;
 mod workspace;

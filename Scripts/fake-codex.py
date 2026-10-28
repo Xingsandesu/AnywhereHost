@@ -12,6 +12,7 @@ def send(value):
 
 root = os.environ['CODEX_HOME']
 project = {'id': 'project-1', 'name': 'Fixture project', 'roots': [{'path': root}]}
+materialized = False
 for line in sys.stdin:
     req = json.loads(line)
     if req.get('id') == 'approval-1' and 'result' in req:
@@ -31,10 +32,18 @@ for line in sys.stdin:
         assert p['threadId'] == 'owned-1'
         result = {'thread': {'id': 'owned-1'}, 'cwd': root, 'model': 'fixture'}
     elif method == 'turn/start':
+        materialized = True
         send({'id': req['id'], 'result': {'turn': {'id': 'turn-1', 'status': 'inProgress'}}})
         send({'id': 'approval-1', 'method': 'item/commandExecution/requestApproval', 'params': {'threadId': 'owned-1', 'turnId': 'turn-1', 'command': 'fixture read only'}})
         continue
-    elif method == 'thread/turns/list': result = {'data': [], 'nextCursor': None}
+    elif method == 'thread/turns/list':
+        if p['threadId'] == 'missing':
+            send({'id': req['id'], 'error': {'code': -32600, 'message': 'thread not found'}})
+            continue
+        if p['threadId'] == 'owned-1' and not materialized:
+            send({'id': req['id'], 'error': {'code': -32600, 'message': 'thread owned-1 is not materialized yet; thread/turns/list is unavailable before first user message'}})
+            continue
+        result = {'data': [{'id': 'turn-1', 'status': 'completed', 'items': []}] if materialized else [], 'nextCursor': None}
     elif method == 'model/list': result = {'data': []}
     else:
         send({'id': req['id'], 'error': {'code': -32601, 'message': 'Unsupported fixture method'}})

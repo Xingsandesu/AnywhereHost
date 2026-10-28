@@ -64,6 +64,10 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check(rpc('command/exec', {'command': 'anything'})['error']['code'] == -32601, 'arbitrary command RPC blocked')
         check(rpc('thread/start', {'cwd': 'relative'})['error']['code'] == -32602, 'new thread requires real absolute cwd')
         check('result' in rpc('thread/start', {'cwd': str(home)}), 'create native Codex thread')
+        empty = rpc('thread/turns/list', {'threadId': 'owned-1'})['result']
+        check(empty['data'] == [] and empty['nextCursor'] is None and empty['historyState'] == 'unmaterialized', 'new thread history is an empty first page')
+        check('error' in rpc('thread/turns/list', {'threadId': 'owned-1', 'cursor': 'older'}), 'empty-history compatibility does not swallow cursor errors')
+        check(rpc('thread/turns/list', {'threadId': 'missing'})['error']['message'] == 'thread not found', 'missing thread still reports original error')
         check('result' in rpc('thread/resume', {'threadId': 'owned-1'}), 'owned thread keeps original identity')
         check(call('/v1/threads/owned-1/access')[1]['canMutate'], 'native client receives writable owned thread state')
         check(rpc('thread/resume', {'threadId': 'owned-1', 'path': '/tmp/substitute'})['error']['code'] == -32602, 'resume path substitution rejected')
@@ -76,6 +80,8 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check(call('/v1/requests/' + request_id + '/respond', {'result': {'decision': 'accept'}})[1]['result']['accepted'], 'approval returned to correct upstream request')
         complete = websocket.until('turn/completed')
         check(complete['payload']['params']['turn']['status'] == 'completed', 'authoritative completion event delivered')
+        history = rpc('thread/turns/list', {'threadId': 'owned-1'})['result']
+        check(history['data'][0]['id'] == 'turn-1' and 'historyState' not in history, 'first turn materializes without an empty snapshot cache')
         check(call('/v1/requests/' + request_id + '/respond', {'result': {'decision': 'accept'}})[1]['error']['code'] == -32004, 'approval is single use')
         websocket.close()
         resumed = WebSocket(port, token, certificate, f'?after={cursor}&epoch={epoch}')

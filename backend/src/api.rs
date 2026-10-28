@@ -173,7 +173,8 @@ async fn rpc(State(s): State<Arc<AppState>>, Json(mut call): Json<RpcCall>) -> J
         call.params["sourceKinds"] = json!(["cli", "vscode", "appServer", "exec"]);
     }
     // Inherited host policies are kept intact. No sandbox/approval overrides are injected.
-    let result = c.request(&call.method, call.params).await;
+    let result = c.request(&call.method, call.params.clone()).await;
+    let result = crate::history::normalize(&call.method, &call.params, result);
     if matches!(call.method.as_str(), "thread/start" | "thread/fork")
         && let Ok(value) = &result
         && let Some(id) = value.pointer("/thread/id").and_then(Value::as_str)
