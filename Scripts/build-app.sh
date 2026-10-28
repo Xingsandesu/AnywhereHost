@@ -2,17 +2,12 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-export PATH="$HOME/.cargo/bin:$PATH"
-python3 Scripts/fetch-frpc.py
-cargo build --release --locked
-swift build -c release
+xcodebuild -project AnywhereHost.xcodeproj -scheme AnywhereHost -configuration Release \
+  -destination 'generic/platform=macOS' -derivedDataPath "$ROOT/.build/xcode" \
+  CODE_SIGNING_ALLOWED=NO build
 APP="$ROOT/dist/AnywhereHost.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/AnywhereHost "$APP/Contents/MacOS/AnywhereHost"
-cp target/release/anywhere-host "$APP/Contents/MacOS/anywhere-host"
-cp Resources/frpc "$APP/Contents/MacOS/frpc"
-cp Resources/frp-LICENSE "$APP/Contents/Resources/frp-LICENSE"
-cp Resources/Info.plist "$APP/Contents/Info.plist"
+mkdir -p "$ROOT/dist"
+ditto "$ROOT/.build/xcode/Build/Products/Release/AnywhereHost.app" "$APP"
 for binary in AnywhereHost anywhere-host frpc; do
   codesign --force --sign "${ANYWHERE_SIGNING_IDENTITY:--}" "$APP/Contents/MacOS/$binary"
 done
