@@ -3,7 +3,7 @@
 - Bundle ID: `com.jintongshu.AnywhereHost`
 - Developer team: `775Y7KV7KU`
 - App Store Connect app: `6827936120`
-- Version: `0.1.0 (2)`
+- Version: `0.1.0 (3)`
 - Target: Apple Silicon, macOS 14 or later.
 
 `AnywhereHost.xcodeproj` builds the SwiftUI application and embeds the Rust Host,
@@ -53,10 +53,12 @@ Codex runtime. See [sandbox setup and execution verification](SANDBOX.md).
 ## Validation
 
 The Release archive and App Store Connect package export succeed. The application
-and both embedded executables pass signature verification. The archived Rust
-executable passes the 34 HTTPS/WSS integration checks with isolated test data;
-the Rust suite, Clippy and Swift package build also pass. The ICNS decodes to all
-ten required pixel representations, including the 1024-pixel image.
+and both embedded executables pass signature verification. On 2026-10-29, the
+14 Rust tests, 44 HTTPS/WSS integration checks, Clippy and Swift package build
+passed. The real loopback frpc/frps regression also passed for default TLS,
+explicit CA verification, saved settings, credential reuse, wrong tokens and
+occupied ports. The ICNS decodes to all ten required pixel representations,
+including the 1024-pixel image. Individual archive upload results are recorded below.
 
 ## TestFlight validation
 
