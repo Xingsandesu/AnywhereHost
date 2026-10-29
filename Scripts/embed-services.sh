@@ -19,6 +19,6 @@ cp Resources/frpc "$HOST_EXECUTABLES/frpc"
 cp Resources/frp-LICENSE "$HOST_RESOURCES/frp-LICENSE"
 if [[ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" && -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]]; then
   for helper in anywhere-host frpc; do
-    /usr/bin/codesign --force --options runtime --entitlements "$SRCROOT/Resources/InheritedSandbox.entitlements" --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$HOST_EXECUTABLES/$helper"
+    /usr/bin/codesign --force --options runtime --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$HOST_EXECUTABLES/$helper"
   done
 fi

@@ -1,15 +1,10 @@
 import Foundation
-import Security
 
 @MainActor
 final class HostProcess {
-    let stateDirectory: URL
-    init(stateDirectory: URL? = nil) {
-        self.stateDirectory = stateDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "AnywhereHost")
-    }
+    let stateDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "AnywhereHost")
     private var process: Process?
-    func start(permissions: HostPermissions) throws {
-        guard permissions.homeAuthorized else { throw HostFailure(message: "请先授权用户主目录。") }
+    func start() throws {
         if process?.isRunning == true { return }
         let binary = Bundle.main.bundleURL.appending(path: "Contents/MacOS/anywhere-host")
         guard FileManager.default.isExecutableFile(atPath: binary.path) else { throw HostFailure(message: "后端未打包。请运行 Scripts/build-app.sh 后打开 dist/AnywhereHost.app。") }
@@ -22,26 +17,11 @@ final class HostProcess {
         p.executableURL = binary
         p.arguments = ["--state-dir", stateDirectory.path]
         var environment = ProcessInfo.processInfo.environment
-        let home = permissions.userHome.path
-        // This hint is emitted only by a signed sandboxed parent. The backend also
-        // checks its own signature; manually launching an inherited helper is not enough.
-        var ownCode: SecCode?
-        var signingInfo: CFDictionary?
-        var staticCode: SecStaticCode?
-        if SecCodeCopySelf([], &ownCode) == errSecSuccess, let ownCode,
-           SecCodeCopyStaticCode(ownCode, [], &staticCode) == errSecSuccess, let staticCode,
-           SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &signingInfo) == errSecSuccess,
-           let info = signingInfo as? [String: Any],
-           let entitlements = info[kSecCodeInfoEntitlementsDict as String] as? [String: Any],
-           entitlements["com.apple.security.app-sandbox"] as? Bool == true,
-           entitlements["com.apple.security.inherit"] as? Bool != true {
-            environment["ANYWHERE_HOST_PARENT_SANDBOXED"] = "1"
-        } else {
-            environment.removeValue(forKey: "ANYWHERE_HOST_PARENT_SANDBOXED")
-        }
+        let userHome = FileManager.default.homeDirectoryForCurrentUser
+        let home = userHome.path
         environment["HOME"] = home
-        environment["CODEX_HOME"] = environment["CODEX_HOME"] ?? permissions.userHome.appending(path: ".codex").path
-        p.currentDirectoryURL = permissions.userHome
+        environment["CODEX_HOME"] = environment["CODEX_HOME"] ?? userHome.appending(path: ".codex").path
+        p.currentDirectoryURL = userHome
         let search = ["\(home)/.cargo/bin", "\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]
         environment["PATH"] = search.joined(separator: ":")
         p.environment = environment

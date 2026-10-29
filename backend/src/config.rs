@@ -17,6 +17,7 @@ pub struct Config {
     pub codex_binary: Option<PathBuf>,
     pub control_socket: Option<PathBuf>,
     pub frpc_binary: Option<PathBuf>,
+    pub apns: Option<crate::apns::Config>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -30,6 +31,7 @@ impl Default for Config {
             codex_binary: None,
             control_socket: None,
             frpc_binary: None,
+            apns: None,
         }
     }
 }

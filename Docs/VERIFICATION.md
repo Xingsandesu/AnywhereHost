@@ -1,4 +1,36 @@
-# Verification — 2026-10-28
+# Verification
+
+## Direct distribution — 2026-10-29
+
+- Removed App Sandbox and inherited-helper entitlements, folder bookmarks and
+  authorization gates, runtime sandbox detection and `externalSandbox` overrides.
+  Store upload instructions and the signed sandbox verification harness were removed.
+- App and CLI use `~/Library/Application Support/AnywhereHost`. There is no
+  legacy-container fallback, import or migration. The direct-distribution Host is
+  now running from the standard state directory; paired-certificate verification
+  confirmed the path. APNs credentials were explicitly configured there, and an
+  isolated process successfully loaded both environments. The running process
+  still needs a restart to load this configuration; no user thread data was copied.
+- `cargo test --locked`: 23 tests passed. `cargo clippy --locked --all-targets --
+  -D warnings`, `cargo build --locked` and `swift build` passed.
+- `Scripts/verify-host.py`: 63 HTTPS/WSS checks passed. Tests observe the Codex
+  peer's actual requests for default and explicit permissions through start, fork,
+  resume, settings updates and turns; Host injects no extra policy calls.
+- `Scripts/build-app.sh` produced a clean Release bundle. `Scripts/verify-app.py
+  dist/AnywhereHost.app --integration` verified valid signatures and Hardened
+  Runtime on all three executables, no App Sandbox/inheritance entitlements, no
+  provisioning profile, and all 63 checks against the packaged Rust helper.
+- Xcode Debug build with the project’s default manual ad-hoc signing also passed
+  all three executable signature/entitlement checks. Explicit signing flags keep
+  Hardened Runtime enabled for Xcode’s ad-hoc builds.
+- Real installed Codex read-only smoke, isolated shared-socket attachment and
+  loopback frpc/frps checks passed, including saved settings, token reuse, failed
+  authentication, port conflicts and custom CA verification.
+- This verifies build/signing/protocol behavior. Native UI acceptance, real-device
+  APNs delivery, Developer ID notarization and cross-Mac installation were not
+  performed in this change.
+
+## Earlier verification — 2026-10-28
 
 ## Empty thread lifecycle regression
 

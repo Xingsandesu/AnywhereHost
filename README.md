@@ -19,7 +19,9 @@ open dist/AnywhereHost.app
 
 需要 macOS 14+、本机已有 Codex App 或 CLI。源码构建使用 Rust 1.99+、Swift 6+ 和 Xcode 命令行工具。打包脚本从官方 release 下载固定版本 frpc 0.71.1，校验归档 SHA-256，把许可证与二进制一起放进 `.app`。不打包或复制 Codex。默认构建当前 Mac 架构；目前验证的是 Apple Silicon。
 
-本地构建使用 ad-hoc 签名，可在本机运行；跨机器分发的 Developer ID 签名、公证和更新机制尚未接入。`ANYWHERE_SIGNING_IDENTITY` 可指定构建签名身份，公证仍需另行完成。
+仅通过独立 `.app` 直接分发，放弃 Mac App Store / TestFlight。应用、Rust 后端和 frpc 均不启用 App Sandbox；不需要授权主目录、项目或 Homebrew 文件夹，Codex 执行权限和审批按其原生配置处理。macOS 文件权限与隐私控制仍然生效，需要访问受保护数据时可从应用打开完全磁盘访问权限设置。
+
+本地构建使用 ad-hoc 签名和 Hardened Runtime。`ANYWHERE_SIGNING_IDENTITY` 可指定 Developer ID Application 签名身份，公证和自动更新尚未接入。详见[直接分发与打包](Docs/DISTRIBUTION.md)。
 
 启动后可选择主机项目、读取会话历史、创建新会话、发送/停止、分叉和压缩上下文。菜单栏提供重新打开控制台和退出。退出 App 会停止其 Rust 后端和 frpc；关闭窗口不会停止服务。
 
@@ -43,9 +45,11 @@ open dist/AnywhereHost.app
 
 ## 配置和数据
 
-`~/Library/Application Support/AnywhereHost/`：目录权限 0700，凭证及私钥 0600。包含配置、随机访问令牌、TLS 身份、事件数据库、主机日志和 frpc 配置。凭证当前使用受限文件存储，尚未迁移 Keychain。
+`~/Library/Application Support/AnywhereHost/`：目录权限 0700，凭证及私钥 0600。包含配置、随机访问令牌、TLS 身份、事件数据库、主机日志和 frpc 配置。凭证使用受限文件存储。App 与 CLI 统一使用此默认目录，不读取旧容器目录，不提供兼容或迁移流程。
 
-`config.json` 可覆盖 `listen`、`codexHome`、`codexBinary`、`controlSocket`、`frpcBinary`。改配置后重启 App。不直接编辑 Codex 数据库或 `.codex-global-state.json`。启动进程通过固定的登录 shell 环境探针恢复 PATH 等环境变量，再显式保留选定 Codex Home；这不是接受远端 shell 指令的 API。
+`config.json` 可覆盖 `listen`、`codexHome`、`codexBinary`、`controlSocket`、`frpcBinary`，以及可选的 `apns` 签名配置。改配置后重启 App。不直接编辑 Codex 数据库或 `.codex-global-state.json`。启动进程通过固定的登录 shell 环境探针恢复 PATH 等环境变量，再显式保留选定 Codex Home；这不是接受远端 shell 指令的 API。
+
+Live Activity 后台更新使用真实 Apple APNs，需配置本团队的 APNs Key 并启用 iOS Push Notifications 能力。配置脚本默认将凭证信息保存到状态目录的独立 `apns.json`，可在升级旧版 Host 前准备；新版启动时加载。[配置、协议与当前验证限制](Docs/APNS.md)。
 
 ## 验证
 
@@ -58,6 +62,7 @@ python3 Scripts/smoke-real-codex.py
 python3 Scripts/verify-frp.py
 python3 Scripts/verify-shared-codex.py
 swift build
+python3 Scripts/verify-app.py dist/AnywhereHost.app --integration
 ```
 
 真实模型闭环测试需显式加 `--inference`：`python3 Scripts/smoke-real-codex.py --inference`。它调用现有主机登录，在临时目录中创建 ephemeral 会话，要求模型只回复标记文本，不调用工具；会产生少量模型用量。

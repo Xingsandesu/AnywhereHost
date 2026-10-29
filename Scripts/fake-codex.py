@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic protocol peer. Never reads real Codex files or contacts a model."""
 import json, os, pathlib, sys
-METHODS = ['initialize', 'project/list', 'project/read', 'thread/list', 'thread/start', 'thread/fork', 'thread/resume', 'thread/turns/list', 'turn/start', 'turn/interrupt', 'model/list']
+METHODS = ['initialize', 'project/list', 'project/read', 'thread/list', 'thread/start', 'thread/fork', 'thread/resume', 'thread/settings/update', 'thread/turns/list', 'turn/start', 'turn/interrupt', 'model/list']
 if 'generate-json-schema' in sys.argv:
     directory = pathlib.Path(sys.argv[sys.argv.index('--out') + 1])
     (directory / 'ClientRequest.json').write_text(json.dumps({'oneOf': [{'properties': {'method': {'enum': [m]}}} for m in METHODS]}))
@@ -23,6 +23,8 @@ for line in sys.stdin:
         continue
     if 'id' not in req: continue
     method = req['method']; p = req.get('params', {})
+    with (pathlib.Path(root) / 'requests.jsonl').open('a') as log:
+        log.write(json.dumps({'method': method, 'params': p}) + '\n')
     if method == 'initialize': result = {'userAgent': 'fixture/1', 'codexHome': root}
     elif method == 'project/list': result = {'data': [project], 'nextCursor': None}
     elif method == 'project/read': result = {'project': project}
@@ -33,6 +35,7 @@ for line in sys.stdin:
     elif method == 'thread/resume':
         assert p['threadId'] == 'owned-1'
         result = {'thread': {'id': 'owned-1'}, 'cwd': root, 'model': 'fixture'}
+    elif method == 'thread/settings/update': result = p
     elif method == 'turn/start':
         materialized = True
         send({'id': req['id'], 'result': {'turn': {'id': 'turn-1', 'status': 'inProgress'}}})

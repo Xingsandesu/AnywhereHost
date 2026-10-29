@@ -31,6 +31,8 @@ pub struct AppState {
     pub runtime_error: RwLock<Option<String>>,
     pub connecting: Mutex<()>,
     pub events: Arc<Events>,
+    pub apns: Option<Arc<crate::apns::Client>>,
+    pub apns_error: Option<String>,
     pub tunnel: Tunnel,
 }
 pub fn router(state: Arc<AppState>) -> Router {
@@ -40,6 +42,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/rpc", post(rpc))
         .route("/v1/events", get(events))
         .route("/v1/requests", get(requests))
+        .route("/v1/live-activities", post(register_activity))
+        .route("/v1/live-activities/remove", post(remove_activity))
+        .route("/v1/live-activities/status", get(activity_status))
         .route("/v1/threads/{id}/access", get(thread_access))
         .route("/v1/requests/{id}/respond", post(respond))
         .route("/v1/projects/{id}/files", get(project_files))
@@ -98,8 +103,40 @@ async fn capabilities(State(s): State<Arc<AppState>>) -> Json<Value> {
         .filter(|m| c.as_ref().is_some_and(|c| c.runtime.methods.contains(**m)))
         .collect();
     Json(
-        json!({"protocolVersion":1,"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
+        json!({"protocolVersion":1,"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"liveActivityPush":{"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c| c.environments()).unwrap_or_default()},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
     )
+}
+async fn activity_status(State(s): State<Arc<AppState>>) -> Json<Value> {
+    Json(json!({"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c|c.environments()).unwrap_or_default(),
+        "error":s.apns_error,"delivery":s.events.activity_status()}))
+}
+async fn register_activity(State(s): State<Arc<AppState>>, Json(registration): Json<crate::live_activity::Registration>) -> Response {
+    if let Err(error) = registration.validate() { return (StatusCode::BAD_REQUEST, Json(json!({"error":error.to_string()}))).into_response() }
+    let Some(client) = &s.apns else { return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"APNs is not configured on this Host"}))).into_response() };
+    if !client.supports(registration.environment) { return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"APNs environment is not configured on this Host"}))).into_response() }
+    if !s.events.has_activity(&registration.thread_id,&registration.turn_id) {
+        let Some(codex) = s.codex.read().await.clone() else { return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"Codex is not connected"}))).into_response() };
+        let checkpoint = s.events.last_sequence();
+        match codex.request("thread/turns/list", json!({"threadId":registration.thread_id,"limit":20,"itemsView":"full","sortDirection":"desc"})).await {
+        Ok(turns) => {
+            let pending = codex.pending_requests().await;
+            if s.events.observe_activity_snapshot(&registration.thread_id,&turns,&pending,checkpoint).is_err() {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":"Could not persist activity snapshot"}))).into_response()
+            }
+        }
+        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"Activity history is not available; retry registration"}))).into_response(),
+        }
+    }
+    match s.events.register_activity(&registration) {
+        Ok(()) => Json(json!({"registered":true})).into_response(),
+        Err(error) => (StatusCode::BAD_REQUEST, Json(json!({"error":error.to_string()}))).into_response(),
+    }
+}
+async fn remove_activity(State(s): State<Arc<AppState>>, Json(removal): Json<crate::live_activity::Removal>) -> Response {
+    match s.events.remove_activity(&removal) {
+        Ok(()) => Json(json!({"removed":true})).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":"Could not remove activity registration"}))).into_response(),
+    }
 }
 // Exposes the same mutation gate used by RPC policy, so clients can offer a native fork action.
 async fn thread_access(State(s): State<Arc<AppState>>, Path(id): Path<String>) -> Json<Value> {
@@ -174,14 +211,8 @@ async fn rpc(State(s): State<Arc<AppState>>, Json(mut call): Json<RpcCall>) -> J
     if call.method == "thread/list" && call.params.get("sourceKinds").is_none() {
         call.params["sourceKinds"] = json!(["cli", "vscode", "appServer", "exec"]);
     }
-    // The signed macOS service is already sandboxed. Preserve approval policy and
-    // reject incompatible explicit sandbox requests instead of weakening them.
-    let app_sandbox = c.runtime.execution_sandbox == "macOSAppSandbox";
-    if app_sandbox && let Err(e) = crate::app_sandbox::prepare(&call.method, &mut call.params) {
-        return rpc_reply(Err(e));
-    }
     let result = c.request(&call.method, call.params.clone()).await;
-    let mut result = crate::history::normalize(&call.method, &call.params, result);
+    let result = crate::history::normalize(&call.method, &call.params, result);
     if matches!(call.method.as_str(), "thread/start" | "thread/fork")
         && let Ok(value) = &result
         && let Some(id) = value.pointer("/thread/id").and_then(Value::as_str)
@@ -191,28 +222,6 @@ async fn rpc(State(s): State<Arc<AppState>>, Json(mut call): Json<RpcCall>) -> J
             -32603,
             format!("Thread created but ownership persistence failed: {e}"),
         )));
-    }
-    if app_sandbox
-        && matches!(
-            call.method.as_str(),
-            "thread/start" | "thread/fork" | "thread/resume"
-        )
-        && let Ok(value) = &mut result
-        && let Some(id) = value.pointer("/thread/id").and_then(Value::as_str)
-    {
-        let policy = crate::app_sandbox::policy();
-        if let Err(e) = c
-            .request(
-                "thread/settings/update",
-                json!({"threadId":id,"sandboxPolicy":policy}),
-            )
-            .await
-        {
-            return rpc_reply(Err(e));
-        }
-        // Reflect the confirmed native policy in the creation/resume response.
-        value["sandbox"] = policy;
-        value["activePermissionProfile"] = Value::Null;
     }
     rpc_reply(result)
 }

@@ -16,6 +16,9 @@ Verify the actual leaf certificate DER SHA-256 against this fingerprint before s
 | --- | --- |
 | `GET /v1/status` | Protocol/app version, runtime mode, readiness, actual Codex Home and binary, runtime error, event epoch/checkpoint, certificate fingerprint |
 | `GET /v1/capabilities` | Runtime-supported RPC methods and Host transport features |
+| `POST /v1/live-activities` | Register or rotate an ActivityKit push token for a native task; requires configured APNs |
+| `POST /v1/live-activities/remove` | Remove a matching activity/token subscription |
+| `GET /v1/live-activities/status` | Authenticated APNs configuration and delivery status, without tokens or keys |
 | `POST /v1/rpc` | Structured native Codex operation |
 | `GET /v1/events?after=N&epoch=E` | Authenticated WSS stream; replays events after N |
 | `GET /v1/threads/{id}/access` | Current mutation policy: `canMutate`, `hostCreated`, `sharedProcess`; not a thread existence check |
@@ -71,7 +74,7 @@ A default thread list explicitly includes CLI, VS Code, app-server and exec sour
 
 Before the first user message, Codex can hold a new persistent thread only in memory. For `thread/turns/list` without a cursor, Host maps only the exact native `-32600` “not materialized yet … before first user message” error for the requested thread to `{"data":[],"nextCursor":null,"backwardsCursor":null,"historyState":"unmaterialized"}`. Missing threads, cursor errors and all other failures remain errors. This is an empty-history state, not a change to mutation permission. Read `/v1/threads/{id}/access` independently; do not classify a failed history read as read-only. Send the first `turn/start` directly on a newly started/unmaterialized thread: `thread/resume` can fail with “no rollout found” until its first message is persisted. Later turns on persisted threads can resume normally. No history response is cached; after the first message, the normal native page is returned.
 
-Host never injects default model, cwd for an existing thread, weakened sandbox, or replacement instructions. New threads require a real absolute cwd. In an independent runtime, existing foreign thread mutations return `-32009`; read history or fork, or attach to the actual shared process. `thread/resume` cannot override the rollout path or entire history. Host-created ownership is persisted locally, not a global exclusive lease.
+Host forwards native Codex permission profiles, sandbox settings and approval policies without rewriting them or issuing follow-up settings overrides. Host never injects a default model, cwd for an existing thread, or replacement instructions. New threads require a real absolute cwd. In an independent runtime, existing foreign thread mutations return `-32009`; read history or fork, or attach to the actual shared process. `thread/resume` cannot override the rollout path or entire history. Host-created ownership is persisted locally, not a global exclusive lease.
 
 ## Events and reconnection
 

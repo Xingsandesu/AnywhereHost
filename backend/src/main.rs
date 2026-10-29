@@ -1,9 +1,10 @@
 mod api;
-mod app_sandbox;
+mod apns;
 mod codex;
 mod config;
 mod events;
 mod history;
+mod live_activity;
 mod policy;
 mod streaming;
 mod tunnel;
@@ -37,6 +38,11 @@ async fn main() -> Result<()> {
         .context("AnywhereHost is already running with this state directory")?;
     let (config, token, fingerprint) = config::prepare(&dir)?;
     let events = Arc::new(events::Events::open(&dir.join("events.sqlite"))?);
+    let (apns, apns_error) = match apns::Client::load_optional(config.apns.as_ref(), &dir) {
+        Ok(client) => (client.map(Arc::new), None),
+        Err(_) => { eprintln!("APNs configuration could not be loaded; check signing key, IDs and permissions");
+            (None, Some("APNs configuration invalid; check signing key, IDs and permissions".to_owned())) }
+    };
     let exe = std::env::current_exe()?;
     let frpc = config
         .frpc_binary
@@ -50,8 +56,11 @@ async fn main() -> Result<()> {
         runtime_error: RwLock::new(None),
         connecting: Mutex::new(()),
         events,
+        apns,
+        apns_error,
         tunnel: tunnel::Tunnel::new(frpc, dir.clone(), config.listen.port()),
     });
+    live_activity::start(state.clone());
     let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(
         dir.join("host-cert.pem"),
         dir.join("host-key.pem"),

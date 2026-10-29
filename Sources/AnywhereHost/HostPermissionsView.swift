@@ -5,43 +5,31 @@ struct HostPermissionsView: View {
     var store: HostStore
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("主机文件权限", systemImage: "externaldrive.badge.checkmark").font(.headline)
-            Text("1. 在系统设置的“完全磁盘访问权限”中添加并启用 Anywhere Host；macOS 提示重新打开时，请退出并重新启动主机。")
+            Label("主机文件访问", systemImage: "externaldrive.badge.checkmark").font(.headline)
+            Text("直接使用这台 Mac 的项目和开发工具，无需逐个授权文件夹。命令执行权限和审批由 Codex 配置决定。")
+            Text("需要访问受 macOS 保护的数据时，可在“完全磁盘访问权限”中启用 Anywhere Host，并按系统提示重新打开应用。")
+                .foregroundStyle(.secondary)
             HStack {
                 Button("打开完全磁盘访问权限", systemImage: "gearshape") {
-                    Task { await store.perform { try store.permissions.openFullDiskAccess() } }
+                    Task {
+                        await store.perform {
+                            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+                            guard NSWorkspace.shared.open(url) else {
+                                throw HostFailure(message: "请打开系统设置 → 隐私与安全性 → 完全磁盘访问权限。")
+                            }
+                        }
+                    }
                 }
                 Button("在 Finder 中显示应用") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
             }
-            Text("2. 授权用户主目录，让沙盒内的 Codex 读取登录与历史，并在项目中执行命令、修改文件。完全磁盘访问权限不会代替此项授权。")
-            if store.permissions.homeAuthorized {
-                Label("主目录已授权", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-            } else {
-                Button("授权用户主目录…", systemImage: "folder.badge.plus") {
-                    Task { await store.perform { if try await store.permissions.authorizeHome() { await store.start() } } }
-                }.buttonStyle(.borderedProminent).disabled(store.busy)
-            }
-            ForEach(store.permissions.folders, id: \.path) { url in
-                Text(verbatim: url.path).font(.caption.monospaced()).textSelection(.enabled)
-            }
-            if let issue = store.permissions.issue { Text(verbatim: issue).foregroundStyle(.orange) }
-            if store.permissions.homeAuthorized {
+            HStack {
                 if store.client == nil {
-                    Text("Homebrew 位于 /opt/homebrew 或 /usr/local 时，也需要授权对应目录。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Button("授权开发工具…") {
-                            Task { await store.perform { _ = try await store.permissions.authorizeFolder(suggestedURL: URL(fileURLWithPath: "/opt/homebrew")) } }
-                        }
-                        Button("授权其他文件夹…") { Task { await store.perform { _ = try await store.permissions.authorizeFolder() } } }
-                        Button("启动主机") { Task { await store.start() } }
-                    }.disabled(store.busy || store.isStarting)
+                    Button("启动主机") { Task { await store.start() } }
                 } else {
-                    Text("需要授权外置磁盘或其他目录时，先结束 Codex 任务，再停止主机。新增授权会在下次启动时传给所有子进程。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("停止主机") { store.stop() }.disabled(store.busy || store.isStarting)
+                    Button("停止主机") { store.stop() }
                 }
-            }
+                Button("打开主机数据目录") { NSWorkspace.shared.open(store.process.stateDirectory) }
+            }.disabled(store.busy || store.isStarting)
         }
         .font(.callout)
         .padding(20).frame(maxWidth: .infinity, alignment: .leading)

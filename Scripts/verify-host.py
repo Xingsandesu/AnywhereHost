@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Real HTTPS/WSS integration tests against a disposable backend + fake Codex peer."""
-import base64, gzip, hashlib, http.client, json, os, pathlib, socket, ssl, struct, subprocess, tempfile, time
+import argparse, base64, gzip, hashlib, http.client, json, os, pathlib, socket, ssl, struct, subprocess, tempfile, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--binary', type=pathlib.Path, default=ROOT / 'target/debug/anywhere-host')
+args = parser.parse_args()
+binary = str(args.binary.resolve())
 passed = 0
 
 def check(condition, name):
@@ -22,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
     with socket.socket() as listener: listener.bind(('127.0.0.1', 0)); port = listener.getsockname()[1]
     (state / 'config.json').write_text(json.dumps({'listen': f'127.0.0.1:{port}', 'codexHome': str(home), 'codexBinary': str(ROOT / 'Scripts/fake-codex.py')}))
     log = (state / 'host.log').open('w')
-    process = subprocess.Popen([str(ROOT / 'target/debug/anywhere-host'), '--state-dir', temporary], stdout=log, stderr=log)
+    process = subprocess.Popen([binary, '--state-dir', temporary], stdout=log, stderr=log)
     def call(path, body=None, token=None, origin=None):
         connection = http.client.HTTPSConnection('127.0.0.1', port, context=ssl._create_unverified_context(), timeout=10)
         connection.connect()
@@ -62,6 +66,11 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check('result' in rpc('thread/list'), 'desktop source filter included')
         check(call('/v1/capabilities')[1]['threadAccess'], 'native client thread access capability advertised')
         check(call('/v1/capabilities')[1]['events']['textDeltaOffsets'] == 'utf8', 'UTF-8 delta positions advertised')
+        check(not call('/v1/capabilities')[1]['liveActivityPush']['enabled'], 'APNs is explicitly unavailable without provider credentials')
+        check(call('/v1/live-activities/status', token='')[0] == 401, 'APNs status requires paired Host authentication')
+        check(call('/v1/live-activities', {'activityId': 'fixture', 'pushToken': 'a' * 64, 'environment': 'sandbox',
+              'threadId': 'desktop-1', 'turnId': 'r', 'startedAt': time.time(), 'tokenVersion': 1})[0] == 503,
+              'APNs registration never pretends success without signing credentials')
         # Compression negotiates through ordinary HTTP without changing JSON,
         # authentication or the WebSocket upgrade path.
         for encoding in ('gzip', 'identity'):
@@ -84,6 +93,22 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check(rpc('command/exec', {'command': 'anything'})['error']['code'] == -32601, 'arbitrary command RPC blocked')
         check(rpc('thread/start', {'cwd': 'relative'})['error']['code'] == -32602, 'new thread requires real absolute cwd')
         check('result' in rpc('thread/start', {'cwd': str(home)}), 'create native Codex thread')
+        # Observe the peer's actual input: no Host policy injection or hidden
+        # thread/settings/update is allowed, including after start/fork/resume.
+        def forwarded(method, params):
+            before = len((home / 'requests.jsonl').read_text().splitlines())
+            result = rpc(method, params)
+            check('result' in result, f'{method} accepts native permission settings')
+            requests = [json.loads(line) for line in (home / 'requests.jsonl').read_text().splitlines()[before:]]
+            check(requests == [{'method': method, 'params': params}], f'{method} forwards settings without rewriting or follow-up overrides')
+            return result['result']
+        forwarded('thread/start', {'cwd': str(home)})
+        for mode in ('read-only', 'workspace-write', 'danger-full-access'):
+            forwarded('thread/start', {'cwd': str(home), 'sandbox': mode, 'approvalPolicy': 'on-request'})
+        forwarded('thread/fork', {'threadId': 'desktop-1', 'sandbox': 'workspace-write', 'approvalPolicy': 'never'})
+        forwarded('thread/resume', {'threadId': 'owned-1', 'permissions': 'fixture-profile', 'config': {'sandbox_mode': 'read-only'}})
+        settings = {'threadId': 'owned-1', 'sandboxPolicy': {'type': 'readOnly'}, 'approvalPolicy': 'on-request'}
+        check(forwarded('thread/settings/update', settings) == settings, 'native settings response is preserved')
         empty = rpc('thread/turns/list', {'threadId': 'owned-1'})['result']
         check(empty['data'] == [] and empty['nextCursor'] is None and empty['historyState'] == 'unmaterialized', 'new thread history is an empty first page')
         check('error' in rpc('thread/turns/list', {'threadId': 'owned-1', 'cursor': 'older'}), 'empty-history compatibility does not swallow cursor errors')
@@ -93,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check(rpc('thread/resume', {'threadId': 'owned-1', 'path': '/tmp/substitute'})['error']['code'] == -32602, 'resume path substitution rejected')
         websocket = WebSocket(port, token, certificate)
         first = websocket.until('host/runtime/connected'); cursor = first['sequence']; epoch = first['epoch']
-        check('result' in rpc('turn/start', {'threadId': 'owned-1', 'input': [{'type': 'text', 'text': 'fixture'}]}), 'structured turn execution')
+        forwarded('turn/start', {'threadId': 'owned-1', 'input': [{'type': 'text', 'text': 'fixture'}], 'sandboxPolicy': {'type': 'readOnly'}, 'approvalPolicy': 'on-request'})
         approval = websocket.until('host/request/pending'); request_id = approval['payload']['params']['requestId']
         check(len(call('/v1/requests')[1]) == 1, 'pending approvals survive phone reconnect')
         check('error' in call('/v1/requests/' + request_id + '/respond', {'result': {'decision': 'yes'}})[1], 'malformed approval does not consume request')
@@ -119,7 +144,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check(call('/v1/projects/project-1/file?path=readme.txt')[1]['text'] == 'fixture contents', 'project text read')
         check(call('/v1/projects/project-1/file?path=../outside.txt')[0] == 400, 'parent traversal rejected')
         check(call('/v1/projects/project-1/file?path=escape')[0] == 400, 'symlink escape rejected')
-        duplicate = subprocess.run([str(ROOT / 'target/debug/anywhere-host'), '--state-dir', temporary], capture_output=True, timeout=5)
+        duplicate = subprocess.run([binary, '--state-dir', temporary], capture_output=True, timeout=5)
         check(duplicate.returncode != 0 and b'already running' in duplicate.stderr, 'duplicate host cannot acquire state lock')
     finally:
         process.terminate()
