@@ -89,3 +89,25 @@ The archive is `AnywhereHost-TF-0.1.0-2.xcarchive` in the dated Xcode Archives
 directory; an adjacent `.upload.json` records the result and log location. It was
 built from the working tree, including the pre-existing tunnel changes. The
 sandbox commit is scoped to sandbox adaptation, signing, verification and docs.
+
+## Build 3 upload result
+
+On 2026-10-29 at 10:37 CST, Xcode reported **Upload succeeded** and
+**EXPORT SUCCEEDED** for `0.1.0 (3)`, built from commit `5b10eb2`.
+This release includes gzip responses, replay-safe text offsets, restored frp
+settings and connection diagnostics. The previously uncommitted tunnel work is
+now included in commit `edd2b3f`; the release working tree was clean.
+
+The optimized Rust build passed all 44 HTTPS/WSS checks and has the same Mach-O
+UUID as the archived helper. The inherited-sandbox helper cannot be launched
+directly from an unsandboxed shell; that attempted invocation did not run the
+fixture. Sandbox behavior remains covered by the signed-app verification
+recorded in [SANDBOX.md](SANDBOX.md), and all three archive signatures and
+entitlements were verified. No production Host process was replaced.
+
+The archive and adjacent upload receipt are under
+`~/Library/Developer/Xcode/Archives/2026-10-29/AnywhereHost-TF-0.1.0-3.*`.
+Rust/frpc dSYM warnings remain non-blocking. The authenticated TestFlight page
+subsequently showed build 3 under version 0.1.0, associated with the internal
+group and two tester invitations. Processing is complete; the displayed beta
+submission state is “准备提交”, matching the existing internally distributed build 2.
