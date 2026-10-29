@@ -25,7 +25,7 @@ Verify the actual leaf certificate DER SHA-256 against this fingerprint before s
 | `GET /v1/projects/{projectId}/files?path=relative&root=0` | Directory entries under an authoritative project root |
 | `GET /v1/projects/{projectId}/file?path=relative&root=0` | UTF-8 file contents, up to 2 MiB |
 | `GET /v1/projects/{projectId}/git?root=0` | Git porcelain status, staged/unstaged diffs, up to 4 MiB each |
-| `GET /v1/tunnel` | frpc process state; not proof of internet reachability |
+| `GET /v1/tunnel` | frpc process state, saved configuration without credentials, recent diagnostics; not proof of internet reachability |
 | `POST /v1/tunnel` | Validate and start bundled frpc with explicit configuration |
 | `POST /v1/tunnel/stop` | Stop the Host-owned frpc process |
 
@@ -115,4 +115,4 @@ Pending approvals are live transport state, retrievable after a phone reconnect,
 {"server":"frps.example.com","serverPort":7000,"remotePort":9443,"token":"your-frps-token","trustedCaFile":null}
 ```
 
-The frps token differs from the Host API token. Credentials are stored in a private generated config file, not command-line arguments. `trustedCaFile:null` uses system trust; a custom CA must be an existing absolute host path. The client verifies configuration with `frpc verify` before starting. Process states are `stopped`, `running`, `exited`, or `unknown`. Public reachability requires a separate check from the phone. No cloud service is provisioned by Host.
+The frps token differs from the Host API token. Credentials are stored in a private generated config file, not command-line arguments. `trustedCaFile:null` uses standard frp TLS encryption without frps certificate verification (compatible with the server-generated certificate). An explicit CA enables frps identity verification and must be an existing absolute host path. The forwarded Host HTTPS certificate is always verified separately by client pinning. `serverPort` is the frps control port; `remotePort` is a distinct allowed public proxy port. An empty `token` reuses the saved credential only when the server address and control port match. Status includes a redacted `config` (`hasToken`, never `token`) and bounded `logTail`, including verifier, login and proxy errors. The client verifies configuration with `frpc verify` before starting. Process states are `stopped`, `running`, `exited`, or `unknown`. Public reachability requires a separate check from the phone. No cloud service is provisioned by Host.

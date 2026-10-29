@@ -3,6 +3,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -36,6 +37,49 @@ impl Tunnel {
             child: Mutex::new(None),
         }
     }
+    // Read the generated config so upgrades also recover previously entered settings.
+    // The frps credential never leaves the private file through the status API.
+    fn saved_config(&self) -> Option<TunnelConfig> {
+        let text = std::fs::read_to_string(self.dir.join("frpc.toml")).ok()?;
+        let value: toml::Value = toml::from_str(&text).ok()?;
+        Some(TunnelConfig {
+            server: value.get("serverAddr")?.as_str()?.into(),
+            server_port: value.get("serverPort")?.as_integer()?.try_into().ok()?,
+            remote_port: value
+                .get("proxies")?
+                .as_array()?
+                .first()?
+                .get("remotePort")?
+                .as_integer()?
+                .try_into()
+                .ok()?,
+            token: value.get("auth")?.get("token")?.as_str()?.into(),
+            trusted_ca_file: value
+                .get("transport")
+                .and_then(|v| v.get("tls"))
+                .and_then(|v| v.get("trustedCaFile"))
+                .and_then(toml::Value::as_str)
+                .map(PathBuf::from),
+        })
+    }
+    fn log_tail(&self, token: &str) -> String {
+        let Ok(mut file) = std::fs::File::open(self.dir.join("frpc.log")) else {
+            return String::new();
+        };
+        let length = file.metadata().map(|m| m.len()).unwrap_or(0);
+        // Do not load an unbounded log into memory or return credentials in diagnostics.
+        let offset = length.saturating_sub(16_384 + token.len() as u64);
+        let _ = file.seek(SeekFrom::Start(offset));
+        let mut bytes = Vec::new();
+        let _ = file.take(32_768).read_to_end(&mut bytes);
+        let output = String::from_utf8_lossy(&bytes);
+        let output = if offset > 0 {
+            output.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+        } else {
+            &output
+        };
+        diagnostic(output, token)
+    }
     pub async fn status(&self) -> Value {
         let mut slot = self.child.lock().await;
         let mut state = "stopped";
@@ -50,26 +94,49 @@ impl Tunnel {
                 Err(_) => state = "unknown",
             }
         }
-        json!({"state":state,"exitCode":exit,"bundled":self.binary.exists(),"note":"running 表示 frpc 进程存活；公网可达性需从 iPhone 验证。"})
+        let config = self.saved_config();
+        let log = self.log_tail(config.as_ref().map(|c| c.token.as_str()).unwrap_or(""));
+        let settings = config.map(|c| {
+            json!({
+                "server":c.server,"serverPort":c.server_port,"remotePort":c.remote_port,
+                "trustedCaFile":c.trusted_ca_file,"hasToken":!c.token.is_empty()
+            })
+        });
+        json!({"state":state,"exitCode":exit,"bundled":self.binary.exists(),"config":settings,"logTail":log,
+            "note":"running 表示 frpc 进程存活；连接结果请查看日志，公网可达性需从 iPhone 验证。"})
     }
-    pub async fn start(&self, config: TunnelConfig) -> Result<Value> {
+    pub async fn start(&self, mut config: TunnelConfig) -> Result<Value> {
+        let mut slot = self.child.lock().await;
+        if let Some(child) = slot.as_mut() {
+            ensure!(child.try_wait()?.is_some(), "隧道正在运行，请先停止");
+        }
+        config.server = config.server.trim().to_owned();
+        if config.token.is_empty()
+            && let Some(saved) = self.saved_config()
+            && saved.server == config.server
+            && saved.server_port == config.server_port
+        {
+            config.token = saved.token;
+        }
         ensure!(
-            !config.server.trim().is_empty() && !config.token.is_empty(),
-            "隧道服务器和 token 不能为空"
+            !config.server.is_empty() && !config.token.is_empty(),
+            "隧道服务器和 token 不能为空；更换 frps 地址或控制端口后需重新输入 token"
         );
         ensure!(
             config.server_port > 0 && config.remote_port > 0,
             "端口必须大于 0"
         );
-        let mut slot = self.child.lock().await;
-        if let Some(child) = slot.as_mut() {
-            ensure!(child.try_wait()?.is_some(), "隧道正在运行，请先停止");
-        }
+        ensure!(
+            config.server_port != config.remote_port,
+            "frps 控制端口（serverPort）和 Host 映射端口（remotePort）必须不同"
+        );
         ensure!(self.binary.is_file(), "app 内未找到 frpc，请运行打包脚本");
         let value = render(&config, self.local_port)?;
         let path = self.dir.join("frpc.toml");
         private_write(&path, value.as_bytes())?;
-        let verified = tokio::time::timeout(
+        let log_path = self.dir.join("frpc.log");
+        private_write(&log_path, b"")?;
+        let verification = tokio::time::timeout(
             Duration::from_secs(10),
             Command::new(&self.binary)
                 .args(["verify", "-c"])
@@ -77,11 +144,22 @@ impl Tunnel {
                 .kill_on_drop(true)
                 .output(),
         )
-        .await??;
-        ensure!(verified.status.success(), "frpc 配置验证失败");
-        let log = self.dir.join("frpc.log");
-        private_write(&log, b"")?;
-        let log = std::fs::OpenOptions::new().append(true).open(log)?;
+        .await
+        .context("frpc 配置验证超时")?
+        .context("无法运行 frpc 配置验证")?;
+        if !verification.status.success() {
+            let details = diagnostic(
+                &format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&verification.stdout),
+                    String::from_utf8_lossy(&verification.stderr)
+                ),
+                &config.token,
+            );
+            private_write(&log_path, details.as_bytes())?;
+            anyhow::bail!("frpc 配置验证失败：{details}");
+        }
+        let log = std::fs::OpenOptions::new().append(true).open(log_path)?;
         let child = Command::new(&self.binary)
             .arg("-c")
             .arg(path)
@@ -92,6 +170,12 @@ impl Tunnel {
             .spawn()
             .context("启动 frpc 失败")?;
         *slot = Some(child);
+        // Surface immediate authentication/transport failures in the start response.
+        // A living process is not evidence that the public proxy is reachable.
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        if let Some(code) = slot.as_mut().context("frpc 进程丢失")?.try_wait()? {
+            anyhow::bail!("frpc 已退出（{code}）：{}", self.log_tail(&config.token));
+        }
         Ok(json!({"state":"starting","remotePort":config.remote_port}))
     }
     pub async fn stop(&self) -> Result<Value> {
@@ -102,6 +186,19 @@ impl Tunnel {
         }
         Ok(json!({"state":"stopped"}))
     }
+}
+fn diagnostic(output: &str, token: &str) -> String {
+    let text = if token.is_empty() {
+        output.to_owned()
+    } else {
+        output.replace(token, "<redacted>")
+    };
+    let lines: Vec<_> = text.lines().collect();
+    lines[lines.len().saturating_sub(8)..]
+        .join("\n")
+        .chars()
+        .take(8000)
+        .collect()
 }
 fn render(config: &TunnelConfig, local_port: u16) -> Result<String> {
     let mut tls = toml::map::Map::new();
@@ -115,13 +212,13 @@ fn render(config: &TunnelConfig, local_port: u16) -> Result<String> {
             "trustedCaFile".into(),
             path.to_string_lossy().into_owned().into(),
         );
-    } else {
-        tls.insert("useSystemCa".into(), true.into());
     }
+    // frpc 0.71.1 has no useSystemCa field. No CA uses standard frp TLS:
+    // encryption without frps identity verification. Host HTTPS remains pinned.
     let value = toml::Value::try_from(json!({
       "serverAddr":config.server,"serverPort":config.server_port,"loginFailExit":true,
       "auth":{"method":"token","token":config.token},
-      "transport":{"tls":tls},
+      "transport":{"tls":tls},"log":{"disablePrintColor":true},
       "proxies":[{"name":"anywhere-host","type":"tcp","localIP":"127.0.0.1","localPort":local_port,"remotePort":config.remote_port}]
     }))?;
     Ok(toml::to_string_pretty(&value)?)
@@ -141,7 +238,16 @@ mod tests {
         let s = render(&c, 9443).unwrap();
         let v: toml::Value = toml::from_str(&s).unwrap();
         assert_eq!(v["proxies"].as_array().unwrap().len(), 1);
-        assert_eq!(v["transport"]["tls"]["useSystemCa"].as_bool(), Some(true));
+        assert_eq!(v["transport"]["tls"]["enable"].as_bool(), Some(true));
+        assert!(v["transport"]["tls"].get("useSystemCa").is_none());
         assert_eq!(v["proxies"][0]["localIP"].as_str(), Some("127.0.0.1"));
+    }
+    #[test]
+    fn diagnostic_redacts_before_truncating() {
+        let secret = "private-token";
+        let input = format!("{}{}", "a".repeat(7998), secret);
+        let result = diagnostic(&input, secret);
+        assert!(!result.contains("private"));
+        assert!(result.chars().count() <= 8000);
     }
 }

@@ -54,7 +54,7 @@ The application stops only its own backend, frpc and app-server children. An OS 
 | Desktop live process | Standard socket adapter implemented | Actual current desktop stdio session attachment; must use a supported shared endpoint |
 | Worktrees | Not implemented | Safe creation, branch selection, artifacts, cleanup and ownership |
 | Skills/plugins | Read/list RPC where available; inherited runtime config | Management UX, desktop-only injected plugin compatibility |
-| Remote connectivity | Bundled frpc, pinned TLS, connection QR, local frps round trip tested | User frps deployment and real WAN/device validation, pairing codes, device revocation |
+| Remote connectivity | Bundled frpc, pinned Host HTTPS, connection QR, local frps tests and public-route check from Mac | Physical iPhone WAN validation, pairing codes, device revocation |
 | macOS packaging | Single native-architecture .app, local signing | Developer ID, notarization, universal binary, updater, login lifecycle |
 | iPhone Duo | Host v1 client, multi-computer/workspace SwiftUI, foreground Live Activity | APNs updates, uploads, worktrees, comprehensive parity and WAN validation |
 
