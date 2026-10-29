@@ -5,6 +5,7 @@ mod config;
 mod events;
 mod history;
 mod policy;
+mod streaming;
 mod tunnel;
 mod workspace;
 use anyhow::{Context, Result};

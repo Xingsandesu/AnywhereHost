@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real HTTPS/WSS integration tests against a disposable backend + fake Codex peer."""
-import base64, hashlib, http.client, json, os, pathlib, socket, ssl, struct, subprocess, tempfile, time
+import base64, gzip, hashlib, http.client, json, os, pathlib, socket, ssl, struct, subprocess, tempfile, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 passed = 0
 
@@ -15,6 +15,8 @@ from host_wire import WebSocket
 with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
     state = pathlib.Path(temporary); home = state / 'codex'; home.mkdir()
     (home / 'readme.txt').write_text('fixture contents')
+    compression_text = 'read-only compression fixture\n' * 1024
+    (home / 'compression.txt').write_text(compression_text)
     (state / 'outside.txt').write_text('must not read')
     (home / 'escape').symlink_to(state / 'outside.txt')
     with socket.socket() as listener: listener.bind(('127.0.0.1', 0)); port = listener.getsockname()[1]
@@ -59,6 +61,24 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check('result' in rpc('project/list'), 'project discovery through actual process protocol')
         check('result' in rpc('thread/list'), 'desktop source filter included')
         check(call('/v1/capabilities')[1]['threadAccess'], 'native client thread access capability advertised')
+        check(call('/v1/capabilities')[1]['events']['textDeltaOffsets'] == 'utf8', 'UTF-8 delta positions advertised')
+        # Compression negotiates through ordinary HTTP without changing JSON,
+        # authentication or the WebSocket upgrade path.
+        for encoding in ('gzip', 'identity'):
+            compressed = http.client.HTTPSConnection('127.0.0.1', port, context=ssl._create_unverified_context(), timeout=10)
+            compressed.connect()
+            check(compressed.sock.getpeercert(binary_form=True) == certificate, 'compression probe uses paired certificate')
+            compressed.request('GET', '/v1/projects/project-1/file?path=compression.txt', headers={'Authorization': 'Bearer ' + token, 'Accept-Encoding': encoding})
+            response = compressed.getresponse(); body = response.read()
+            if encoding == 'gzip':
+                check(response.getheader('Content-Encoding') == 'gzip', 'Host negotiates gzip')
+                plain = gzip.decompress(body)
+                check(len(body) < len(plain), 'compressed file response is smaller')
+            else:
+                check(response.getheader('Content-Encoding') is None, 'identity clients remain compatible')
+                plain = body
+            check(json.loads(plain)['text'] == compression_text, 'compressed JSON retains protocol semantics')
+            compressed.close()
         check(not call('/v1/threads/desktop-1/access')[1]['canMutate'], 'native client receives read-only foreign thread state')
         check(rpc('thread/resume', {'threadId': 'desktop-1'})['error']['code'] == -32009, 'foreign thread cannot be resumed in independent process')
         check(rpc('command/exec', {'command': 'anything'})['error']['code'] == -32601, 'arbitrary command RPC blocked')
@@ -78,6 +98,8 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check(len(call('/v1/requests')[1]) == 1, 'pending approvals survive phone reconnect')
         check('error' in call('/v1/requests/' + request_id + '/respond', {'result': {'decision': 'yes'}})[1], 'malformed approval does not consume request')
         check(call('/v1/requests/' + request_id + '/respond', {'result': {'decision': 'accept'}})[1]['result']['accepted'], 'approval returned to correct upstream request')
+        delta = websocket.until('item/agentMessage/delta')
+        check(delta['payload']['params']['hostTextOffset'] == 0, 'streamed delta has exact text position')
         complete = websocket.until('turn/completed')
         check(complete['payload']['params']['turn']['status'] == 'completed', 'authoritative completion event delivered')
         history = rpc('thread/turns/list', {'threadId': 'owned-1'})['result']
@@ -85,6 +107,8 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check(call('/v1/requests/' + request_id + '/respond', {'result': {'decision': 'accept'}})[1]['error']['code'] == -32004, 'approval is single use')
         websocket.close()
         resumed = WebSocket(port, token, certificate, f'?after={cursor}&epoch={epoch}')
+        replay_delta = resumed.until('item/agentMessage/delta')
+        check(replay_delta == delta, 'delta positions and sequence survive journal replay')
         replay = resumed.until('turn/completed'); resumed.close()
         check(replay['sequence'] == complete['sequence'], 'WSS cursor replay preserves event sequence')
         # Cursor validation is checked by a full Upgrade request.

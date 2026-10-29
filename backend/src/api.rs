@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 use std::sync::{Arc, atomic::Ordering};
 use subtle::ConstantTimeEq;
 use tokio::sync::{Mutex, RwLock, broadcast};
+use tower_http::compression::CompressionLayer;
 
 pub struct AppState {
     pub token: String,
@@ -48,6 +49,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/tunnel", get(tunnel_status).post(tunnel_start))
         .route("/v1/tunnel/stop", post(tunnel_stop))
         .layer(DefaultBodyLimit::max(8 * 1024 * 1024))
+        .layer(CompressionLayer::new())
         .layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state)
 }
@@ -96,7 +98,7 @@ async fn capabilities(State(s): State<Arc<AppState>>) -> Json<Value> {
         .filter(|m| c.as_ref().is_some_and(|c| c.runtime.methods.contains(**m)))
         .collect();
     Json(
-        json!({"protocolVersion":1,"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
+        json!({"protocolVersion":1,"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
     )
 }
 // Exposes the same mutation gate used by RPC policy, so clients can offer a native fork action.

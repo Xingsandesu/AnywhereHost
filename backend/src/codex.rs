@@ -54,6 +54,7 @@ pub struct Codex {
     approvals: Mutex<HashMap<String, Value>>,
     next: AtomicU64,
     events: Arc<Events>,
+    text_offsets: std::sync::Mutex<crate::streaming::TextOffsets>,
     child: Mutex<Option<Child>>,
     transport_tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
@@ -268,6 +269,7 @@ impl Codex {
             approvals: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
             events,
+            text_offsets: std::sync::Mutex::new(crate::streaming::TextOffsets::default()),
             child: Mutex::new(child),
             transport_tasks: Mutex::new(Vec::new()),
         });
@@ -365,7 +367,7 @@ impl Codex {
         }
         self.approvals.lock().await.clear();
     }
-    async fn receive(&self, message: Value) {
+    async fn receive(&self, mut message: Value) {
         if message.get("method").is_none() {
             let key = message["id"].to_string();
             if let Some(tx) = self.pending.lock().await.remove(&key) {
@@ -414,6 +416,7 @@ impl Codex {
                     .await
                     .retain(|_, pending| pending["params"]["turnId"] != *turn_id);
             }
+            self.text_offsets.lock().unwrap().annotate(&mut message);
             let _ = self.events.publish(message);
         }
     }

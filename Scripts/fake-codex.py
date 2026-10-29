@@ -16,7 +16,9 @@ materialized = False
 for line in sys.stdin:
     req = json.loads(line)
     if req.get('id') == 'approval-1' and 'result' in req:
+        send({'method': 'item/started', 'params': {'threadId': 'owned-1', 'turnId': 'turn-1', 'item': {'id': 'item-1', 'type': 'agentMessage', 'text': ''}}})
         send({'method': 'item/agentMessage/delta', 'params': {'threadId': 'owned-1', 'turnId': 'turn-1', 'itemId': 'item-1', 'delta': 'Approved fixture'}})
+        send({'method': 'item/completed', 'params': {'threadId': 'owned-1', 'turnId': 'turn-1', 'item': {'id': 'item-1', 'type': 'agentMessage', 'text': 'Approved fixture'}}})
         send({'method': 'turn/completed', 'params': {'threadId': 'owned-1', 'turn': {'id': 'turn-1', 'status': 'completed'}}})
         continue
     if 'id' not in req: continue
