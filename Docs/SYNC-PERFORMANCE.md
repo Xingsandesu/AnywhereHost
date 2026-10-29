@@ -31,4 +31,4 @@ Router 使用 `tower-http` 的 `CompressionLayer`，仅启用 gzip。通过 `Acc
 - `Scripts/verify-host.py`：真实 HTTPS 的 gzip/identity 协商与正文一致性；WSS delta 位置在 journal 重放后保持不变。
 - 相邻客户端 `HostSynchronizationTests.swift`：并发加载、请求合并、快照/事件重叠、Unicode、旧 Host、完成事件与取消行为。
 
-执行标准回归：`cargo test`、`cargo clippy --all-targets -- -D warnings`、`cargo build`、`python3 Scripts/verify-host.py`、`swift build`。这些检查需在可执行开发工具的正常环境中完成；当前编辑会话的 App Sandbox 阻止 Cargo/测试进程，新增依赖的 Cargo.lock 更新也尚待 Cargo 完成。不要将源代码更新当作已发布或已通过网络集成测试。
+2026-10-29 在正常开发环境完成标准回归：14 项 `cargo test`、`cargo clippy --all-targets -- -D warnings`、`cargo build`、44 项 `python3 Scripts/verify-host.py` HTTPS/WSS 集成检查及 `swift build` 全部通过；Cargo 已更新压缩依赖锁文件。相邻客户端的 46 项 iOS 测试全部通过（参数化展开共 50 次，0 跳过），包含双 Host HTTPS/WSS 与公网证书固定验证。尚未替换正在运行的 Host，不能将测试通过等同于生产性能收益已验证。
