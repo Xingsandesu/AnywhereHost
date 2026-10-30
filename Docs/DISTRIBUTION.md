@@ -31,8 +31,9 @@ this project. The local ad-hoc build is for this Mac; it is not a notarized rele
 
 ## Execution and data
 
-The app starts the bundled backend immediately, using the user's existing Codex
-Home and login environment. Project folders, external volumes and toolchains do
+The app starts the bundled backend when setup begins on a fresh installation.
+Existing configured installations continue starting the service while the new guide
+is shown, using the user's existing Codex Home and login environment. Project folders, external volumes and toolchains do
 not require Host folder grants. Codex receives native permission and approval
 settings without Host overrides. macOS file permissions and privacy controls still
 apply; the UI links to Full Disk Access when protected data is needed.

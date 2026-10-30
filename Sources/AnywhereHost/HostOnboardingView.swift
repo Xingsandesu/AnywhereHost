@@ -12,7 +12,11 @@ struct HostSetupRootView: View {
                 if store.permissions.showOnboarding { HostOnboardingView(store: store) }
                 else { HostPermissionPage(store: store) }
             }
-            .task { if !store.permissions.showOnboarding { await prepareHost() } }
+            .task {
+                // Existing installations keep serving paired devices while the new guide is shown.
+                let configured = FileManager.default.fileExists(atPath: store.process.stateDirectory.appending(path: "config.json").path)
+                if !store.permissions.showOnboarding || configured { await prepareHost() }
+            }
             .onChange(of: store.permissions.showOnboarding) { _, showing in
                 if !showing { Task { await prepareHost() } }
             }

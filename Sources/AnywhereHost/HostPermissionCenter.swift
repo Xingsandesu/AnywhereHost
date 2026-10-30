@@ -54,7 +54,7 @@ struct DirectoryAccessResult: Decodable, Sendable {
 
 /// An owned, short-lived subprocess keeps TCC prompts and unresponsive volumes off the UI thread.
 @MainActor struct DirectoryPermissionProbe {
-    var executable = Bundle.main.bundleURL.appending(path: "Contents/MacOS/anywhere-host")
+    var executable = Bundle.main.bundleURL.appending(path: "Contents/MacOS/anywhere-permission-probe")
     var timeout: Duration = .seconds(8)
 
     func check(_ path: String) async -> DirectoryPermissionState {

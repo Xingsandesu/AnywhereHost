@@ -29,6 +29,7 @@ enum JSONValue: Codable, Sendable, Equatable {
     var string: String? { if case .string(let v) = self { return v }; return nil }
     var bool: Bool { if case .bool(let v) = self { return v }; return false }
     var array: [JSONValue] { if case .array(let v) = self { return v }; return [] }
+    var objectValue: [String: JSONValue] { if case .object(let v) = self { return v }; return [:] }
     var pretty: String { let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]; return (try? String(decoding: e.encode(self), as: UTF8.self)) ?? "" }
 }
 struct HostFailure: LocalizedError { let message: String; var errorDescription: String? { message } }

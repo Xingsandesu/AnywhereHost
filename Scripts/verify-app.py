@@ -13,7 +13,7 @@ args = parser.parse_args()
 app = args.app.resolve()
 subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
 assert not (app / 'Contents/embedded.provisionprofile').exists(), 'Unexpected store provisioning profile'
-for name in ('AnywhereHost', 'anywhere-host', 'frpc'):
+for name in ('AnywhereHost', 'anywhere-host', 'anywhere-permission-probe', 'frpc'):
     executable = app / 'Contents/MacOS' / name
     subprocess.run(['codesign', '--verify', '--strict', str(executable)], check=True)
     signature = subprocess.run(['codesign', '-d', '--verbose=4', str(executable)], capture_output=True, check=True)

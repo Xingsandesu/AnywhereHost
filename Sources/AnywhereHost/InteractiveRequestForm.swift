@@ -37,6 +37,14 @@ struct InteractiveRequestForm: View {
                     Task { await store.perform { try await store.respond(request.id, result: .object(["permissions": .object([:]), "scope": .string("turn")])) } }
                 }
             }.disabled(store.busy)
+        } else if let approval = MCPToolApproval(request.params) {
+            MCPToolApprovalView(approval: approval) { result in
+                Task { await store.perform { try await store.respond(request.id, result: result) } }
+            }.disabled(store.busy)
+        } else if MCPRequestForm.supports(request.params) {
+            MCPRequestForm(params: request.params) { result in
+                Task { await store.perform { try await store.respond(request.id, result: result) } }
+            }.disabled(store.busy)
         } else {
             // MCP elicitation schemas vary. Do not invent a positive answer to an unknown form.
             VStack(alignment: .leading, spacing: 8) {
