@@ -17,6 +17,7 @@ struct HostWorkspace: View {
         }
         .toolbar {
             ToolbarItem { Label(store.connected ? "主机在线" : "主机离线", systemImage: store.connected ? "circle.fill" : "circle.dotted").foregroundStyle(store.connected ? .green : .secondary).font(.caption) }
+            ToolbarItem { Button("权限检查", systemImage: store.permissions.toolbarSymbol) { store.permissions.openPermissions() } }
             ToolbarItem { Button("连接 iPhone", systemImage: "qrcode") { showConnection = true } }
         }
         .sheet(isPresented: $showConnection) { ConnectionSettings(store: store) }

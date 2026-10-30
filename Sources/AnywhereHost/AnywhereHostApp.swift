@@ -29,9 +29,8 @@ import SwiftUI
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
         Window("Anywhere Host", id: "host") {
-            HostWorkspace(store: delegate.store)
+            HostSetupRootView(store: delegate.store)
                 .frame(minWidth: 960, minHeight: 640)
-                .task { await delegate.store.start() }
         }
         .defaultSize(width: 1180, height: 780)
         .commands { CommandGroup(replacing: .newItem) {} }
@@ -47,6 +46,15 @@ struct HostMenu: View {
     var body: some View {
         Text(store.runtimeLabel)
         Button("显示主机控制台") { openWindow(id: "host"); NSApp.activate(ignoringOtherApps: true) }
+        Button("权限检查…") {
+            openWindow(id: "host"); NSApp.activate(ignoringOtherApps: true)
+            store.permissions.openPermissions()
+        }
+        Button("重新查看使用引导…") {
+            openWindow(id: "host"); NSApp.activate(ignoringOtherApps: true)
+            store.permissions.openOnboarding()
+        }
+        Divider()
         Button("退出 Anywhere Host") { NSApp.terminate(nil) }
     }
 }

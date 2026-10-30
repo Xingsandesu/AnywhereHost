@@ -13,6 +13,6 @@ ditto "$ROOT/.build/xcode/Build/Products/Release/AnywhereHost.app" "$APP"
 for binary in anywhere-host frpc; do
   codesign --force --options runtime --sign "${ANYWHERE_SIGNING_IDENTITY:--}" "$APP/Contents/MacOS/$binary"
 done
-codesign --force --options runtime --sign "${ANYWHERE_SIGNING_IDENTITY:--}" "$APP"
+codesign --force --options runtime --entitlements "$ROOT/Resources/AnywhereHost.entitlements" --sign "${ANYWHERE_SIGNING_IDENTITY:--}" "$APP"
 python3 Scripts/verify-app.py "$APP"
 printf 'Built %s\n' "$APP"

@@ -6,6 +6,7 @@ mod events;
 mod history;
 mod live_activity;
 mod policy;
+mod permissions;
 mod streaming;
 mod tunnel;
 mod workspace;
@@ -16,6 +17,11 @@ use tokio::sync::{Mutex, RwLock};
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.get(1).is_some_and(|arg| arg == "--check-directory-access") {
+        anyhow::ensure!(args.len() == 3, "expected one directory path");
+        println!("{}", serde_json::to_string(&permissions::check(std::path::Path::new(&args[2])))?);
+        return Ok(());
+    }
     let dir = args
         .windows(2)
         .find(|a| a[0] == "--state-dir")

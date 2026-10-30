@@ -22,6 +22,10 @@ for name in ('AnywhereHost', 'anywhere-host', 'frpc'):
     entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
     assert not entitlements.get('com.apple.security.app-sandbox'), f'{name} still has App Sandbox'
     assert not entitlements.get('com.apple.security.inherit'), f'{name} still inherits App Sandbox'
+    if name == 'AnywhereHost':
+        assert entitlements.get('com.apple.security.automation.apple-events'), 'Host is missing Apple Events consent entitlement'
+        info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+        assert info.get('NSAppleEventsUsageDescription'), 'Missing Apple Events usage description'
     print(f'PASS {name}: valid signature, Hardened Runtime, no App Sandbox', flush=True)
 if args.integration:
     subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name('verify-host.py')),

@@ -31,6 +31,7 @@ struct PendingRequest: Identifiable, Sendable { let id: String; let method: Stri
 @MainActor @Observable
 final class HostStore {
     let process = HostProcess()
+    let permissions = HostPermissionCenter()
     var client: HostClient?
     var status: JSONValue = .null
     var tunnel: JSONValue = .null

@@ -5,5 +5,8 @@ let package = Package(
     name: "AnywhereHost",
     platforms: [.macOS(.v14)],
     products: [.executable(name: "AnywhereHost", targets: ["AnywhereHost"])],
-    targets: [.executableTarget(name: "AnywhereHost", path: "Sources/AnywhereHost")]
+    targets: [
+        .executableTarget(name: "AnywhereHost", path: "Sources/AnywhereHost"),
+        .testTarget(name: "AnywhereHostTests", dependencies: ["AnywhereHost"])
+    ]
 )
