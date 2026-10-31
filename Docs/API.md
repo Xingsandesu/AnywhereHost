@@ -119,3 +119,19 @@ Pending approvals are live transport state, retrievable after a phone reconnect,
 ```
 
 The frps token differs from the Host API token. Credentials are stored in a private generated config file, not command-line arguments. `trustedCaFile:null` uses standard frp TLS encryption without frps certificate verification (compatible with the server-generated certificate). An explicit CA enables frps identity verification and must be an existing absolute host path. The forwarded Host HTTPS certificate is always verified separately by client pinning. `serverPort` is the frps control port; `remotePort` is a distinct allowed public proxy port. An empty `token` reuses the saved credential only when the server address and control port match. Status includes a redacted `config` (`hasToken`, never `token`) and bounded `logTail`, including verifier, login and proxy errors. The client verifies configuration with `frpc verify` before starting. Process states are `stopped`, `running`, `exited`, or `unknown`. Public reachability requires a separate check from the phone. No cloud service is provisioned by Host.
+
+## Bounded item history (2026-10-29)
+
+Native clients now use `thread/items/list` (60 items by default, maximum 100) and `thread/turns/list` with `itemsView: notLoaded` for turn state. Host clamps item limits to 1–100 and turn limits to 1–20. Missing turns view defaults to `notLoaded`; cursors and explicit views remain native. `/v1/capabilities.history` advertises these limits. Clients must update together; the mobile client no longer falls back to full turn downloads. A single item can still be large.
+
+Permission settings remain native, including `sandboxPolicy: {type: dangerFullAccess}` with `approvalPolicy: never`. Host never silently upgrades permissions. Mobile UI exposes runtime-supported settings, queue, goal, and background-terminal methods from the existing allowlist.
+
+## 远程桌面
+
+- `GET /v1/desktop`：`supported`、`enabled`、`reachable`、`protocol: "rfb"`、`engine: "noVNC"`、`activeSessions`。独立于 Codex 运行时可用性。
+- `GET /v1/desktop/socket`：WebSocket Upgrade，认证沿用 Host Bearer，禁止浏览器 Origin。仅接受二进制 RFB，转发到固定 `127.0.0.1:5900`；不接受远端目标地址或 shell 字符串。最多两个会话，消息最多 1 MiB。关闭开关时最多约一秒撤销当前连接。
+- `/v1/capabilities.remoteDesktop`：`supported: true`、`protocol: "rfb"`、`transport: "native-wss"` 表示后端实现，不代表屏幕共享已开启或用户已通过屏幕共享认证。
+
+开关由本机 SwiftUI 控制台保存到状态目录 `desktop.json`：`{"enabled":true}`。文件缺失、无效或关闭时拒绝连接。远程 API 不提供启用操作；在 Mac 控制台开启后无需重启。系统“屏幕共享”需另行开启并配置允许访问的用户。
+
+屏幕流通过现有 HTTPS/WSS 隧道传输，不进入 Codex 事件、历史或数据库。客户端使用 noVNC 自带的 RFB 认证，不在 Host 保存 Mac 登录密码。

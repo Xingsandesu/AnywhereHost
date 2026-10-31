@@ -92,6 +92,10 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         check(rpc('thread/resume', {'threadId': 'desktop-1'})['error']['code'] == -32009, 'foreign thread cannot be resumed in independent process')
         check(rpc('command/exec', {'command': 'anything'})['error']['code'] == -32601, 'arbitrary command RPC blocked')
         check(rpc('thread/start', {'cwd': 'relative'})['error']['code'] == -32602, 'new thread requires real absolute cwd')
+        item_page = rpc('thread/items/list', {'threadId':'desktop-1', 'limit':9999, 'sortDirection':'desc'})['result']
+        check(len(item_page['data']) == 100 and item_page['nextCursor'] == '100', 'long single turn is bounded to 100 items')
+        next_page = rpc('thread/items/list', {'threadId':'desktop-1', 'cursor':item_page['nextCursor'], 'limit':60, 'sortDirection':'desc'})['result']
+        check(len(next_page['data']) == 60 and next_page['data'][0]['item']['id'] == 'item-139', 'item cursor preserves order within the same turn')
         check('result' in rpc('thread/start', {'cwd': str(home)}), 'create native Codex thread')
         # Observe the peer's actual input: no Host policy injection or hidden
         # thread/settings/update is allowed, including after start/fork/resume.
@@ -107,7 +111,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
             forwarded('thread/start', {'cwd': str(home), 'sandbox': mode, 'approvalPolicy': 'on-request'})
         forwarded('thread/fork', {'threadId': 'desktop-1', 'sandbox': 'workspace-write', 'approvalPolicy': 'never'})
         forwarded('thread/resume', {'threadId': 'owned-1', 'permissions': 'fixture-profile', 'config': {'sandbox_mode': 'read-only'}})
-        settings = {'threadId': 'owned-1', 'sandboxPolicy': {'type': 'readOnly'}, 'approvalPolicy': 'on-request'}
+        settings = {'threadId': 'owned-1', 'sandboxPolicy': {'type': 'dangerFullAccess'}, 'approvalPolicy': 'never'}
         check(forwarded('thread/settings/update', settings) == settings, 'native settings response is preserved')
         empty = rpc('thread/turns/list', {'threadId': 'owned-1'})['result']
         check(empty['data'] == [] and empty['nextCursor'] is None and empty['historyState'] == 'unmaterialized', 'new thread history is an empty first page')

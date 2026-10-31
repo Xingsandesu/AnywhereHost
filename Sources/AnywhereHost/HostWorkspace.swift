@@ -4,6 +4,7 @@ import SwiftUI
 struct HostWorkspace: View {
     @Bindable var store: HostStore
     @State private var showConnection = false
+    @State private var showDesktop = false
     var body: some View {
         NavigationSplitView {
             ProjectSidebar(store: store)
@@ -12,15 +13,17 @@ struct HostWorkspace: View {
             ThreadSidebar(store: store)
                 .navigationSplitViewColumnWidth(min: 230, ideal: 280)
         } detail: {
-            if store.selectedThread != nil { ConversationDetail(store: store) }
+            if store.selectedThread != nil { ConversationDetail(store: store).id(store.selectedThread) }
             else { HostOverview(store: store, showConnection: $showConnection) }
         }
         .toolbar {
             ToolbarItem { Label(store.connected ? "主机在线" : "主机离线", systemImage: store.connected ? "circle.fill" : "circle.dotted").foregroundStyle(store.connected ? .green : .secondary).font(.caption) }
             ToolbarItem { Button("权限检查", systemImage: store.permissions.toolbarSymbol) { store.permissions.openPermissions() } }
+            ToolbarItem { Button("远程桌面", systemImage: "display") { showDesktop = true } }
             ToolbarItem { Button("连接 iPhone", systemImage: "qrcode") { showConnection = true } }
         }
         .sheet(isPresented: $showConnection) { ConnectionSettings(store: store) }
+        .sheet(isPresented: $showDesktop) { HostDesktopSettings(store: store) }
         .alert("操作未完成", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("知道了", role: .cancel) { store.error = nil }
         } message: { Text(store.error ?? "") }
@@ -128,6 +131,7 @@ struct StatusMetric: View {
 struct ConversationDetail: View {
     @Bindable var store: HostStore
     @State private var showContext = false
+    @State private var visibleCount = 100
     var body: some View {
         VStack(spacing: 0) {
             if !store.status["runtime"]["sharesLiveProcess"].bool {
@@ -136,9 +140,20 @@ struct ConversationDetail: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
-                    if store.nextHistoryCursor != nil { Button("加载更早内容") { Task { await store.loadHistory(more: true) } } }
-                    if store.loadingHistory { ProgressView() }
-                    ForEach(store.items) { item in TimelineRow(item: item) }
+                    if store.nextHistoryCursor != nil || store.items.count > visibleCount {
+                        Button("加载更早内容") {
+                            Task {
+                                if store.items.count <= visibleCount { await store.loadHistory(more: true) }
+                                visibleCount += 100
+                            }
+                        }.disabled(store.loadingHistory)
+                    }
+                    if store.loadingHistory && store.items.isEmpty { ProgressView("读取会话…") }
+                    if let error = store.historyError {
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                        Button("重试") { Task { await store.loadHistory() } }
+                    }
+                    ForEach(store.items.suffix(visibleCount)) { item in TimelineRow(item: item) }
                 }.frame(maxWidth: 900, alignment: .leading).padding(24)
             }
             if !store.pending.isEmpty { ApprovalPanel(store: store) }
@@ -162,35 +177,65 @@ struct ConversationDetail: View {
 }
 struct TimelineRow: View {
     let item: TimelineItem
+    @GestureState private var holding = false
+    @State private var accessibleExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var progress: Bool { !["userMessage", "agentMessage", "plan"].contains(item.kind) }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(item.kind == "userMessage" ? "你" : item.kind == "agentMessage" ? "Codex" : item.kind, systemImage: item.kind == "userMessage" ? "person.crop.circle" : "sparkle")
-                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            if item.kind == "agentMessage" || item.kind == "userMessage" {
-                Text(item.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            if progress {
+                HStack {
+                    Image(systemName: item.kind == "commandExecution" ? "terminal" : "sparkle")
+                    Text(String(item.text.prefix(240).split(separator: "\n", maxSplits: 1).first ?? "")).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down").rotationEffect(.degrees(holding || accessibleExpanded ? 180 : 0))
+                }
+                .font(.callout).foregroundStyle(.secondary).frame(minHeight: 32).contentShape(.rect)
+                .gesture(LongPressGesture(minimumDuration: 0.3).sequenced(before: DragGesture(minimumDistance: 0))
+                    .updating($holding) { value, state, _ in if case .second(true, _) = value { state = true } })
+                if holding || accessibleExpanded {
+                    Text(verbatim: String(item.text.prefix(12_000))).font(.caption.monospaced()).lineLimit(20)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             } else {
-                DisclosureGroup("查看执行详情") { Text(verbatim: item.text).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                Label(item.kind == "userMessage" ? "你" : "Codex", systemImage: item.kind == "userMessage" ? "person.crop.circle" : "sparkle")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(verbatim: String(item.text.prefix(24_000))).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
             }
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(item.kind == "userMessage" ? 0.6 : 0.2), in: .rect(cornerRadius: 12))
+        }
+        .padding(progress ? 10 : 16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(item.kind == "userMessage" ? 0.6 : 0.2), in: .rect(cornerRadius: 12))
+        .clipped().animation(reduceMotion ? nil : .smooth(duration: 0.22), value: holding || accessibleExpanded)
+        .accessibilityAction(named: accessibleExpanded ? "收起详情" : "展开详情") { accessibleExpanded.toggle() }
+        .contextMenu { Button("复制完整内容") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(item.text, forType: .string) } }
     }
 }
 struct ComposerPanel: View {
     @Bindable var store: HostStore
+    @State private var showsTools = false
+    @State private var showsSettings = false
+    @FocusState private var focused: Bool
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TextField("继续当前会话…", text: $store.draft, axis: .vertical).lineLimit(2...8).textFieldStyle(.plain)
-            HStack {
-                Text(store.lastEvent).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
-                if store.activeTurn != nil {
-                    Button("停止", systemImage: "stop.fill") { Task { await store.perform { try await store.interrupt() } } }.disabled(store.busy)
-                } else {
-                    Button("发送", systemImage: "arrow.up") { Task { await store.perform { try await store.send() } } }
-                        .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
-                        .disabled(store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.busy || !store.connected)
+        HStack(alignment: .bottom, spacing: 12) {
+            Button {
+                focused = false; showsTools.toggle()
+            } label: { Image(systemName: "plus").frame(width: 32, height: 32) }
+                .buttonStyle(.borderless).help("工具")
+                .popover(isPresented: $showsTools) {
+                    HostToolsBubble(store: store) { showsTools = false; showsSettings = true }
                 }
-            }
-        }.padding(20)
+            TextField("继续当前会话…", text: $store.draft, axis: .vertical)
+                .lineLimit(1...7).textFieldStyle(.plain).focused($focused)
+            Button {
+                Task { await store.perform { if store.activeTurn != nil { try await store.interrupt() } else { try await store.send() } } }
+            } label: { Image(systemName: store.activeTurn != nil ? "stop.fill" : "arrow.up").frame(width: 32, height: 32) }
+                .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
+                .help(store.activeTurn != nil ? "停止" : "发送")
+                .disabled(store.busy || !store.connected || !store.canMutate || (store.activeTurn == nil && store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+        }
+        .padding(20)
+        .onChange(of: store.selectedThread) { _, _ in focused = false; showsTools = false }
+        .sheet(isPresented: $showsSettings) { HostSettingsSheet(store: store) }
     }
 }
 struct ApprovalPanel: View {

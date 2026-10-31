@@ -76,3 +76,17 @@ The previous no-CA configuration emitted `transport.tls.useSystemCa`, which the 
 `Scripts/verify-frp.py` now covers the previously missing default-certificate server and no-CA client path, as well as explicit CA validation, persisted settings across a Host restart, scoped credential reuse, failed authentication, occupied public ports, private config/log permissions and redacted status. Server readiness is checked by its loopback listener rather than a fixed startup delay.
 
 After rebuilding and restarting the packaged app, a real connection to the user's supplied frps authenticated and registered the Host TCP proxy. This Mac reached the public HTTPS endpoint through frps: its leaf certificate exactly matched the local Host certificate; missing credentials returned HTTP 401; authenticated status returned HTTP 200 and a connected Codex App runtime. This is a real public-route check from the Mac, not a physical iPhone network test. No production thread was mutated.
+
+## 2026-10-29 interaction and paging update
+
+Validated in a staged source copy: Swift package build; cargo test (24 passed); cargo clippy --all-targets -- -D warnings; verify-host.py (65 checks), including long single-turn item pagination and unchanged full-access settings forwarding. The Mac UI uses a single icon popover, per-command hold previews and stable observable rows, retains history during refresh, and stops reloading history on every completion. Mac real-runtime UI/performance profiling remains unverified; these checks use an isolated fake Codex peer.
+
+## App 内远程桌面（2026-10-31）
+
+`cargo test` 的后端 29 项与 permission-probe 4 项通过；`cargo clippy --all-targets -- -D warnings`、`swift build`、原有 `Scripts/verify-host.py` 的 65 项 HTTPS/WSS 回归通过。
+
+新增 `Scripts/verify-desktop.py` 使用隔离状态目录和本机 RFB 字节服务，通过 TLS 叶证书校验、认证/Origin 拒绝、默认关闭、服务可达性、两会话上限、512 KiB 二进制往返、ping/pong、开关撤销、连接名额释放及文本帧拒绝检查。远端不能指定代理目标或启用开关。
+
+客户端 WKWebView/noVNC 实际握手、像素绘制与键盘消息测试通过。以上不代表真实 Mac 屏幕共享登录、中文输入法或蜂窝网络已经验收。构建产物位于 `dist/AnywhereHost.app`，没有替换运行中的系统安装。
+
+Release 打包产物另经 `python3 Scripts/verify-desktop.py --binary dist/AnywhereHost.app/Contents/MacOS/anywhere-host` 验证，同样通过远程桌面协议检查。模拟器显示四色 fixture 画面，输入面板、快捷键菜单及关闭流程可操作；临时服务与配对凭证已清理。

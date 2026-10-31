@@ -24,6 +24,7 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 use tower_http::compression::CompressionLayer;
 
 pub struct AppState {
+    pub desktop: crate::desktop::Desktop,
     pub token: String,
     pub fingerprint: String,
     pub config: Config,
@@ -38,6 +39,8 @@ pub struct AppState {
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/status", get(status))
+        .route("/v1/desktop", get(crate::desktop::status))
+        .route("/v1/desktop/socket", get(crate::desktop::socket))
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/rpc", post(rpc))
         .route("/v1/events", get(events))
@@ -103,7 +106,7 @@ async fn capabilities(State(s): State<Arc<AppState>>) -> Json<Value> {
         .filter(|m| c.as_ref().is_some_and(|c| c.runtime.methods.contains(**m)))
         .collect();
     Json(
-        json!({"protocolVersion":1,"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"liveActivityPush":{"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c| c.environments()).unwrap_or_default()},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
+        json!({"protocolVersion":1,"remoteDesktop":{"supported":true,"protocol":"rfb","transport":"native-wss"},"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"liveActivityPush":{"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c| c.environments()).unwrap_or_default()},"history":{"itemPagination":true,"defaultItemLimit":60,"maxItemLimit":100},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
     )
 }
 async fn activity_status(State(s): State<Arc<AppState>>) -> Json<Value> {
@@ -211,6 +214,7 @@ async fn rpc(State(s): State<Arc<AppState>>, Json(mut call): Json<RpcCall>) -> J
     if call.method == "thread/list" && call.params.get("sourceKinds").is_none() {
         call.params["sourceKinds"] = json!(["cli", "vscode", "appServer", "exec"]);
     }
+    crate::history::bound_page(&call.method, &mut call.params);
     let result = c.request(&call.method, call.params.clone()).await;
     let result = crate::history::normalize(&call.method, &call.params, result);
     if matches!(call.method.as_str(), "thread/start" | "thread/fork")

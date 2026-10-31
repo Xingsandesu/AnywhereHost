@@ -1,6 +1,21 @@
 use crate::codex::RpcError;
 use serde_json::{Value, json};
 
+/// Bound independent item pages; a turn may contain thousands of tool calls.
+pub fn bound_page(method: &str, params: &mut Value) {
+    let maximum = match method {
+        "thread/items/list" => 100,
+        "thread/turns/list" => 20,
+        _ => return,
+    };
+    let default = if method == "thread/items/list" { 60 } else { 5 };
+    let limit = params["limit"].as_u64().unwrap_or(default).clamp(1, maximum);
+    params["limit"] = json!(limit);
+    if method == "thread/turns/list" && params["itemsView"].is_null() {
+        params["itemsView"] = json!("notLoaded");
+    }
+}
+
 /// Codex keeps a newly started thread in memory before its first user message.
 /// That precise lifecycle state means an empty first page, not a failed read.
 pub fn normalize(
@@ -34,6 +49,21 @@ mod tests {
             -32600,
             "thread t is not materialized yet; thread/turns/list is unavailable before first user message",
         )
+    }
+    #[test]
+    fn item_pages_are_bounded_without_rewriting_cursors_or_permissions() {
+        let mut p = json!({"limit": 10000, "cursor":"older", "approvalPolicy":"never", "sandboxPolicy":{"type":"dangerFullAccess"}});
+        bound_page("thread/items/list", &mut p);
+        assert_eq!(p["limit"], 100);
+        assert_eq!(p["cursor"], "older");
+        assert_eq!(p["approvalPolicy"], "never");
+        assert_eq!(p["sandboxPolicy"]["type"], "dangerFullAccess");
+        let original = p.clone();
+        bound_page("thread/settings/update", &mut p);
+        assert_eq!(p, original);
+        let mut p = json!({});
+        bound_page("thread/turns/list", &mut p);
+        assert_eq!(p, json!({"limit":5,"itemsView":"notLoaded"}));
     }
     #[test]
     fn first_message_pending_has_an_empty_page() {

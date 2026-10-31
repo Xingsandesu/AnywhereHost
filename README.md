@@ -66,3 +66,11 @@ python3 Scripts/verify-app.py dist/AnywhereHost.app --integration
 ```
 
 真实模型闭环测试需显式加 `--inference`：`python3 Scripts/smoke-real-codex.py --inference`。它调用现有主机登录，在临时目录中创建 ephemeral 会话，要求模型只回复标记文本，不调用工具；会产生少量模型用量。
+
+## 远程桌面
+
+控制台工具栏“远程桌面”可允许已配对的 iPhone 通过 App 内嵌 noVNC 控制此 Mac。首次需在系统设置开启“屏幕共享”并配置允许访问的用户；开关默认关闭。桌面复用现有 frp HTTPS/WSS 隧道，公网不需要新增 5900 端口。客户端可将屏幕共享凭证存入其钥匙串，后续一键连接。
+
+Host 必须保持运行且 Mac 开机联网。当前没有远程唤醒、音频或文件传输。协议及边界见 [API](Docs/API.md)；客户端使用说明见相邻工程 `AnyWhereCoding/Docs/REMOTE-DESKTOP.md`。
+
+`python3 Scripts/verify-desktop.py` 在未占用的本机 5900 上创建隔离字节服务验证认证、WSS 转发与撤销，不更改系统屏幕共享设置。真实 Mac 登录和蜂窝网络连接需另行验收。

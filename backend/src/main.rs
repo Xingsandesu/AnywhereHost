@@ -2,6 +2,7 @@ mod api;
 mod apns;
 mod codex;
 mod config;
+mod desktop;
 mod events;
 mod history;
 mod live_activity;
@@ -55,6 +56,7 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| exe.parent().unwrap().join("frpc"));
     let state = Arc::new(api::AppState {
+        desktop: desktop::Desktop::new(dir.join("desktop.json")),
         token,
         fingerprint,
         config: config.clone(),

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic protocol peer. Never reads real Codex files or contacts a model."""
 import json, os, pathlib, sys
-METHODS = ['initialize', 'project/list', 'project/read', 'thread/list', 'thread/start', 'thread/fork', 'thread/resume', 'thread/settings/update', 'thread/turns/list', 'turn/start', 'turn/interrupt', 'model/list']
+METHODS = ['initialize', 'project/list', 'project/read', 'thread/list', 'thread/start', 'thread/fork', 'thread/resume', 'thread/settings/update', 'thread/turns/list', 'thread/items/list', 'turn/start', 'turn/interrupt', 'model/list']
 if 'generate-json-schema' in sys.argv:
     directory = pathlib.Path(sys.argv[sys.argv.index('--out') + 1])
     (directory / 'ClientRequest.json').write_text(json.dumps({'oneOf': [{'properties': {'method': {'enum': [m]}}} for m in METHODS]}))
@@ -49,6 +49,10 @@ for line in sys.stdin:
             send({'id': req['id'], 'error': {'code': -32600, 'message': 'thread owned-1 is not materialized yet; thread/turns/list is unavailable before first user message'}})
             continue
         result = {'data': [{'id': 'turn-1', 'status': 'completed', 'items': []}] if materialized else [], 'nextCursor': None}
+    elif method == 'thread/items/list':
+        entries=[{'turnId':'turn-1','item':{'id':f'item-{i}','type':'commandExecution','command':f'command {i}','aggregatedOutput':'details','status':'completed'}} for i in range(240)]
+        entries.reverse(); offset=int(p.get('cursor',0)); limit=p.get('limit',60)
+        result={'data':entries[offset:offset+limit], 'nextCursor':str(offset+limit) if offset+limit<len(entries) else None}
     elif method == 'model/list': result = {'data': []}
     else:
         send({'id': req['id'], 'error': {'code': -32601, 'message': 'Unsupported fixture method'}})
