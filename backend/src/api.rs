@@ -11,19 +11,20 @@ use axum::{
         DefaultBodyLimit, Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::{HeaderMap, Request, StatusCode},
-    middleware::{self, Next},
+    http::{HeaderMap, StatusCode},
+    middleware::{self},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::{Arc, atomic::Ordering};
-use subtle::ConstantTimeEq;
+
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tower_http::compression::CompressionLayer;
 
 pub struct AppState {
+    pub security: crate::security::Security,
     pub desktop: crate::desktop::Desktop,
     pub token: String,
     pub fingerprint: String,
@@ -38,6 +39,11 @@ pub struct AppState {
 }
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/v1/security/challenge", get(|| async { StatusCode::UNAUTHORIZED }))
+        .route("/v1/security/pair", post(|| async { StatusCode::UNAUTHORIZED }))
+        .route("/v1/security/ticket", post(crate::security::ticket))
+        .route("/v1/security/devices", get(crate::security::devices))
+        .route("/v1/security/devices/revoke", post(crate::security::revoke))
         .route("/v1/status", get(status))
         .route("/v1/desktop", get(crate::desktop::status))
         .route("/v1/desktop/socket", get(crate::desktop::socket))
@@ -52,51 +58,20 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/requests/{id}/respond", post(respond))
         .route("/v1/projects/{id}/files", get(project_files))
         .route("/v1/projects/{id}/file", get(project_file))
+        .route("/v1/projects/{id}/image", get(project_image))
         .route("/v1/projects/{id}/git", get(project_git))
         .route("/v1/runtime/connect", post(connect))
         .route("/v1/tunnel", get(tunnel_status).post(tunnel_start))
         .route("/v1/tunnel/stop", post(tunnel_stop))
         .layer(DefaultBodyLimit::max(8 * 1024 * 1024))
         .layer(CompressionLayer::new())
-        .layer(middleware::from_fn_with_state(state.clone(), auth))
+        .layer(middleware::from_fn_with_state(state.clone(), crate::security::guard))
         .with_state(state)
-}
-async fn auth(
-    State(state): State<Arc<AppState>>,
-    req: Request<axum::body::Body>,
-    next: Next,
-) -> Response {
-    // Native API: forbid browser origins and query-string credentials, including WebSocket upgrades.
-    if req.headers().contains_key("origin") {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({"error":"browser_origin_not_allowed"})),
-        )
-            .into_response();
-    }
-    let token = req
-        .headers()
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .unwrap_or("");
-    if !bool::from(token.as_bytes().ct_eq(state.token.as_bytes())) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error":"unauthorized"})),
-        )
-            .into_response();
-    }
-    let mut response = next.run(req).await;
-    response
-        .headers_mut()
-        .insert("cache-control", "no-store".parse().unwrap());
-    response
 }
 async fn status(State(s): State<Arc<AppState>>) -> Json<Value> {
     let c = s.codex.read().await;
     Json(
-        json!({"name":"AnywhereHost","version":env!("CARGO_PKG_VERSION"),"protocolVersion":1,"connected":c.as_ref().is_some_and(|c|c.ready.load(Ordering::SeqCst)),"runtime":c.as_ref().map(|c|&c.runtime),"error":s.runtime_error.read().await.clone(),"eventEpoch":s.events.epoch,"lastEventSequence":s.events.last_sequence(),"certificateSHA256":s.fingerprint,"listen":s.config.listen.to_string()}),
+        json!({"name":"AnywhereHost","version":env!("CARGO_PKG_VERSION"),"protocolVersion":2,"connected":c.as_ref().is_some_and(|c|c.ready.load(Ordering::SeqCst)),"runtime":c.as_ref().map(|c|&c.runtime),"error":s.runtime_error.read().await.clone(),"eventEpoch":s.events.epoch,"lastEventSequence":s.events.last_sequence(),"certificateSHA256":s.fingerprint,"listen":s.config.listen.to_string()}),
     )
 }
 async fn capabilities(State(s): State<Arc<AppState>>) -> Json<Value> {
@@ -106,7 +81,7 @@ async fn capabilities(State(s): State<Arc<AppState>>) -> Json<Value> {
         .filter(|m| c.as_ref().is_some_and(|c| c.runtime.methods.contains(**m)))
         .collect();
     Json(
-        json!({"protocolVersion":1,"remoteDesktop":{"supported":true,"protocol":"rfb","transport":"native-wss"},"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"liveActivityPush":{"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c| c.environments()).unwrap_or_default()},"history":{"itemPagination":true,"defaultItemLimit":60,"maxItemLimit":100},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
+        json!({"protocolVersion":2,"images":{"projectRead":true,"maxBytes":12582912},"remoteDesktop":{"supported":true,"protocol":"rfb","transport":"native-wss"},"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"liveActivityPush":{"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c| c.environments()).unwrap_or_default()},"history":{"itemPagination":true,"defaultItemLimit":60,"maxItemLimit":100},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
     )
 }
 async fn activity_status(State(s): State<Arc<AppState>>) -> Json<Value> {
@@ -264,9 +239,13 @@ async fn events(
     State(s): State<Arc<AppState>>,
     Query(cursor): Query<Cursor>,
     headers: HeaderMap,
+    axum::Extension(principal): axum::Extension<crate::security::Principal>,
     ws: WebSocketUpgrade,
 ) -> Response {
     let _ = headers;
+    let Ok(permit) = s.security.streams.clone().try_acquire_owned() else {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    };
     let rx = s.events.sender.subscribe();
     let replay = match s.events.replay(cursor.after, cursor.epoch.as_deref()) {
         Ok(r) => r,
@@ -275,7 +254,20 @@ async fn events(
         }
     };
     ws.max_message_size(1024)
-        .on_upgrade(move |socket| stream(socket, rx, replay, cursor.after))
+        .max_frame_size(1024)
+        .on_upgrade(move |socket| async move {
+            let _permit = permit;
+            let revoked = async {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    if !s.security.active(&principal) { break; }
+                }
+            };
+            tokio::select! {
+                _ = stream(socket, rx, replay, cursor.after, s.clone(), principal.clone()) => {},
+                _ = revoked => {},
+            }
+        })
         .into_response()
 }
 async fn stream(
@@ -283,29 +275,35 @@ async fn stream(
     mut rx: broadcast::Receiver<Event>,
     replay: Vec<Event>,
     mut last: i64,
+    state: Arc<AppState>,
+    principal: crate::security::Principal,
 ) {
     for event in replay {
+        if !state.security.active(&principal) { return; }
         last = event.sequence;
-        if socket
-            .send(Message::Text(serde_json::to_string(&event).unwrap().into()))
-            .await
-            .is_err()
+        if send_event(&mut socket, Message::Text(serde_json::to_string(&event).unwrap().into())).await.is_err()
         {
             return;
         }
     }
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(20));
+    let mut revoked = tokio::time::interval(std::time::Duration::from_secs(1));
+    let mut last_received = std::time::Instant::now();
     loop {
         tokio::select! {
-          message=socket.recv()=>{match message{Some(Ok(Message::Close(_)))|None|Some(Err(_))=>break,_=>{}}},
+          _=revoked.tick()=>{if !state.security.active(&principal) || last_received.elapsed().as_secs() > 90 {break;}},
+          message=socket.recv()=>{match message{Some(Ok(Message::Close(_)))|None|Some(Err(_))=>break,Some(Ok(Message::Ping(_)|Message::Pong(_)))=>{last_received=std::time::Instant::now();},_=>break}},
           result=rx.recv()=>{match result {
-            Ok(event)=>{if event.sequence<=last{continue;}last=event.sequence;if socket.send(Message::Text(serde_json::to_string(&event).unwrap().into())).await.is_err(){break;}},
-            Err(broadcast::error::RecvError::Lagged(_))=>{let _=socket.send(Message::Text(json!({"error":"resync_required"}).to_string().into())).await;break;},
+            Ok(event)=>{if event.sequence<=last{continue;}last=event.sequence;if send_event(&mut socket, Message::Text(serde_json::to_string(&event).unwrap().into())).await.is_err(){break;}},
+            Err(broadcast::error::RecvError::Lagged(_))=>{let _=send_event(&mut socket, Message::Text(json!({"error":"resync_required"}).to_string().into())).await;break;},
             Err(_)=>break,
           }},
-          _=heartbeat.tick()=>{if socket.send(Message::Ping(Vec::new().into())).await.is_err(){break;}}
+          _=heartbeat.tick()=>{if send_event(&mut socket, Message::Ping(Vec::new().into())).await.is_err(){break;}}
         }
     }
+}
+async fn send_event(socket: &mut WebSocket, message: Message) -> Result<(), ()> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), socket.send(message)).await.map_err(|_| ())?.map_err(|_| ())
 }
 async fn tunnel_status(State(s): State<Arc<AppState>>) -> Json<Value> {
     Json(s.tunnel.status().await)
@@ -390,6 +388,16 @@ async fn project_file(
         }
         .await,
     )
+}
+async fn project_image(
+    State(s): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(q): Query<FileQuery>,
+) -> Response {
+    workspace_reply(async {
+        let root = project_root(&s, &id, q.root).await?;
+        crate::workspace::image(&root, &q.path).await
+    }.await)
 }
 async fn project_git(
     State(s): State<Arc<AppState>>,

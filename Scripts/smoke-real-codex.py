@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from security_wire import admin_headers
 """Read-only smoke against the user's installed Codex. No model inference or existing thread mutation."""
 import hashlib, http.client, json, pathlib, socket, ssl, subprocess, tempfile, time, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -14,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-real-') as temp:
         conn.connect()
         expected = ssl.PEM_cert_to_DER_cert((directory / 'host-cert.pem').read_text())
         assert hashlib.sha256(conn.sock.getpeercert(binary_form=True)).digest() == hashlib.sha256(expected).digest()
-        headers = {'Authorization': 'Bearer ' + (directory / 'access-token').read_text(), 'Content-Type': 'application/json'}
+        headers = {**admin_headers(port,(directory/'admin-key-v2').read_text(),expected,'POST' if body is not None else 'GET',path,json.dumps(body) if body is not None else None), 'Content-Type': 'application/json'}
         conn.request('POST' if body is not None else 'GET', path, json.dumps(body) if body is not None else None, headers)
         response = conn.getresponse(); data = json.loads(response.read()); conn.close()
         assert response.status == 200, data
@@ -62,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-real-') as temp:
             thread_id = created['thread']['id']
             from host_wire import WebSocket
             status = request('/v1/status')
-            stream = WebSocket(port, (directory / 'access-token').read_text(), ssl.PEM_cert_to_DER_cert((directory / 'host-cert.pem').read_text()), f"?after={status['lastEventSequence']}&epoch={status['eventEpoch']}")
+            stream = WebSocket(port, (directory / 'admin-key-v2').read_text(), ssl.PEM_cert_to_DER_cert((directory / 'host-cert.pem').read_text()), f"?after={status['lastEventSequence']}&epoch={status['eventEpoch']}")
             stream.socket.settimeout(60)
             try:
                 if persistent:

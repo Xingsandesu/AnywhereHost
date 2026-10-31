@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from security_wire import admin_headers
 """Exercise actual TLS/WSS desktop relay with a disposable local RFB byte peer.
 Requires unused loopback port 5900; never changes macOS screen sharing settings.
 Use --serve to keep a small framebuffer fixture for Simulator verification.
@@ -24,7 +25,8 @@ class DesktopSocket:
         self.sock.settimeout(5)
         assert self.sock.getpeercert(binary_form=True) == cert
         key = base64.b64encode(os.urandom(16)).decode()
-        headers = f'GET /v1/desktop/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer {token}\r\n'
+        auth = ''.join(f'{k}: {v}\r\n' for k,v in admin_headers(port,token,cert,'GET','/v1/desktop/socket').items())
+        headers = f'GET /v1/desktop/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n{auth}'
         if origin: headers += f'Origin: {origin}\r\n'
         self.sock.sendall((headers+'\r\n').encode())
         head = b''
@@ -95,13 +97,13 @@ with tempfile.TemporaryDirectory(prefix='anywhere-desktop-') as directory:
         temporary=state/'desktop.tmp';temporary.write_text(json.dumps({'enabled':enabled}));temporary.replace(state/'desktop.json')
     def call(path, token):
         c=http.client.HTTPSConnection('127.0.0.1',port,context=ssl._create_unverified_context(),timeout=5)
-        c.request('GET',path,headers={'Authorization':'Bearer '+token});r=c.getresponse();value=(r.status,json.loads(r.read()));c.close();return value
+        c.request('GET',path,headers=admin_headers(port,token,ssl.PEM_cert_to_DER_cert((state/'host-cert.pem').read_text()),'GET',path));r=c.getresponse();value=(r.status,json.loads(r.read()));c.close();return value
     with (state/'log').open('w') as log:
         process=subprocess.Popen([str(args.binary.resolve()),'--state-dir',str(state)],stdout=log,stderr=log)
         try:
             for _ in range(100):
                 try:
-                    token=(state/'access-token').read_text()
+                    token=(state/'admin-key-v2').read_text()
                     if call('/v1/status',token)[0]==200: break
                 except (OSError,ValueError): pass
                 time.sleep(.1)
@@ -116,7 +118,8 @@ with tempfile.TemporaryDirectory(prefix='anywhere-desktop-') as directory:
             assert DesktopSocket(port,token,cert,'https://hostile.invalid').status==403
             if args.serve:
                 import urllib.parse
-                link='anywhere-host://connect?'+urllib.parse.urlencode({'v':'1','endpoint':f'https://127.0.0.1:{port}','token':token,'certificateSHA256':hashlib.sha256(cert).hexdigest(),'name':'Desktop Fixture'})
+                c=http.client.HTTPSConnection('127.0.0.1',port,context=ssl._create_unverified_context()); c.request('POST','/v1/security/ticket',headers=admin_headers(port,token,cert,'POST','/v1/security/ticket'));ticket=json.loads(c.getresponse().read())['ticket'];c.close()
+                link='anywhere-host://connect?'+urllib.parse.urlencode({'v':'2','endpoint':f'https://127.0.0.1:{port}','ticket':ticket,'certificateSHA256':hashlib.sha256(cert).hexdigest(),'name':'Desktop Fixture'})
                 linkfile=pathlib.Path('/tmp/anywhere-desktop-fixture-link');linkfile.write_text(link);linkfile.chmod(0o600)
                 print('Fixture ready. Pairing link stored privately in /tmp/anywhere-desktop-fixture-link',flush=True)
                 while True: time.sleep(1)

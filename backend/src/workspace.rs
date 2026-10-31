@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, ensure};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -52,6 +53,30 @@ pub async fn file(root: &Path, relative: &str) -> Result<Value> {
     let text = String::from_utf8(bytes).context("file is not UTF-8 text")?;
     Ok(json!({"path":relative,"text":text}))
 }
+/// Images use the same canonical project boundary and authentication as file reads.
+pub async fn image(root: &Path, relative: &str) -> Result<Value> {
+    const LIMIT: u64 = 12 * 1024 * 1024;
+    let target = resolve(root, relative)?;
+    let file = tokio::fs::File::open(target).await?;
+    let metadata = file.metadata().await?;
+    ensure!(metadata.is_file() && metadata.len() <= LIMIT, "Only images up to 12 MiB are supported");
+    let mut bytes = Vec::new();
+    file.take(LIMIT + 1).read_to_end(&mut bytes).await?;
+    ensure!(bytes.len() <= LIMIT as usize, "image exceeds size limit");
+    let mime = image_mime(&bytes).context("Unsupported image format")?;
+    Ok(json!({"path":relative,"mimeType":mime,"dataBase64":STANDARD.encode(bytes)}))
+}
+fn image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") { Some("image/png") }
+    else if bytes.starts_with(&[0xff, 0xd8, 0xff]) { Some("image/jpeg") }
+    else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") { Some("image/gif") }
+    else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") { Some("image/webp") }
+    else if bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*") { Some("image/tiff") }
+    else if bytes.starts_with(b"BM") { Some("image/bmp") }
+    else if bytes.get(4..8) == Some(b"ftyp") && matches!(bytes.get(8..12), Some(b"heic" | b"heix" | b"mif1")) { Some("image/heic") }
+    else { None }
+}
+
 async fn git(root: &Path, args: &[&str]) -> Result<String> {
     let mut cmd = Command::new("/usr/bin/git");
     cmd.arg("--no-optional-locks")
@@ -95,6 +120,27 @@ pub async fn git_state(root: &Path) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn image_reads_are_bounded_and_confined_to_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        let png = b"\x89PNG\r\n\x1a\nfixture";
+        std::fs::write(root.join("image.png"), png).unwrap();
+        let result = image(&root, "image.png").await.unwrap();
+        assert_eq!(result["mimeType"], "image/png");
+        assert_eq!(STANDARD.decode(result["dataBase64"].as_str().unwrap()).unwrap(), png);
+        std::fs::write(root.join("text.png"), b"secret text").unwrap();
+        assert!(image(&root, "text.png").await.is_err());
+        std::fs::write(temp.path().join("outside.png"), png).unwrap();
+        std::os::unix::fs::symlink(temp.path().join("outside.png"), root.join("escape.png")).unwrap();
+        for path in ["../outside.png", "escape.png", "/etc/passwd", ""] {
+            assert!(image(&root, path).await.is_err());
+        }
+        let large = std::fs::File::create(root.join("large.png")).unwrap();
+        large.set_len(12 * 1024 * 1024 + 1).unwrap();
+        assert!(image(&root, "large.png").await.is_err());
+    }
     #[test]
     fn reject_traversal_and_symlink_escape() {
         let t = tempfile::tempdir().unwrap();

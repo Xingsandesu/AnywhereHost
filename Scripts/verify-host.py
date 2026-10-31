@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from security_wire import admin_headers
 """Real HTTPS/WSS integration tests against a disposable backend + fake Codex peer."""
 import argparse, base64, gzip, hashlib, http.client, json, os, pathlib, socket, ssl, struct, subprocess, tempfile, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -19,6 +20,10 @@ from host_wire import WebSocket
 with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
     state = pathlib.Path(temporary); home = state / 'codex'; home.mkdir()
     (home / 'readme.txt').write_text('fixture contents')
+    image_bytes = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=')
+    (home / 'preview.png').write_bytes(image_bytes)
+    (state / 'outside.png').write_bytes(image_bytes)
+    (home / 'escape.png').symlink_to(state / 'outside.png')
     compression_text = 'read-only compression fixture\n' * 1024
     (home / 'compression.txt').write_text(compression_text)
     (state / 'outside.txt').write_text('must not read')
@@ -33,8 +38,8 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
         cert = ssl.PEM_cert_to_DER_cert((state / 'host-cert.pem').read_text())
         assert connection.sock.getpeercert(binary_form=True) == cert
         headers = {'Content-Type': 'application/json'}
-        if token is None: token = (state / 'access-token').read_text()
-        if token: headers['Authorization'] = 'Bearer ' + token
+        if token is None: token = (state / 'admin-key-v2').read_text()
+        headers.update(admin_headers(port,token,cert,'POST' if body is not None else 'GET',path,json.dumps(body) if body is not None else None))
         if origin: headers['Origin'] = origin
         connection.request('POST' if body is not None else 'GET', path, json.dumps(body) if body is not None else None, headers)
         response = connection.getresponse(); data = json.loads(response.read()); status = response.status; connection.close()
@@ -49,9 +54,9 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
             except (OSError, FileNotFoundError): pass
             time.sleep(0.1)
         else: raise RuntimeError('Host did not become ready')
-        token = (state / 'access-token').read_text()
+        token = (state / 'admin-key-v2').read_text()
         certificate = ssl.PEM_cert_to_DER_cert((state / 'host-cert.pem').read_text())
-        check(len(token) == 64 and (state / 'access-token').stat().st_mode & 0o777 == 0o600, 'private random credential')
+        check(len(token) == 64 and (state / 'admin-key-v2').stat().st_mode & 0o777 == 0o600, 'private random credential')
         check(call('/v1/status', token='')[0] == 401, 'unauthenticated HTTP rejected')
         check(call('/v1/status', token='wrong')[0] == 401, 'incorrect bearer rejected')
         check(call('/v1/status', origin='https://hostile.invalid')[0] == 403, 'browser origins rejected')
@@ -77,7 +82,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
             compressed = http.client.HTTPSConnection('127.0.0.1', port, context=ssl._create_unverified_context(), timeout=10)
             compressed.connect()
             check(compressed.sock.getpeercert(binary_form=True) == certificate, 'compression probe uses paired certificate')
-            compressed.request('GET', '/v1/projects/project-1/file?path=compression.txt', headers={'Authorization': 'Bearer ' + token, 'Accept-Encoding': encoding})
+            compressed.request('GET', '/v1/projects/project-1/file?path=compression.txt', headers={**admin_headers(port,token,certificate,'GET','/v1/projects/project-1/file?path=compression.txt'), 'Accept-Encoding': encoding})
             response = compressed.getresponse(); body = response.read()
             if encoding == 'gzip':
                 check(response.getheader('Content-Encoding') == 'gzip', 'Host negotiates gzip')
@@ -88,6 +93,13 @@ with tempfile.TemporaryDirectory(prefix='anywhere-test-') as temporary:
                 plain = body
             check(json.loads(plain)['text'] == compression_text, 'compressed JSON retains protocol semantics')
             compressed.close()
+        check(call('/v1/capabilities')[1]['images']['projectRead'], 'project image capability advertised')
+        image_status, image = call('/v1/projects/project-1/image?path=preview.png')
+        check(image_status == 200 and image['mimeType'] == 'image/png' and base64.b64decode(image['dataBase64']) == image_bytes, 'paired client reads exact project image bytes')
+        check(call('/v1/projects/project-1/image?path=preview.png', token='')[0] == 401, 'images require authentication')
+        check(call('/v1/projects/project-1/image?path=readme.txt')[0] == 400, 'text cannot masquerade as an image')
+        for image_path in ('../outside.png', 'escape.png', '/etc/passwd'):
+            check(call('/v1/projects/project-1/image?path=' + image_path)[0] == 400, 'image boundary rejects ' + image_path)
         check(not call('/v1/threads/desktop-1/access')[1]['canMutate'], 'native client receives read-only foreign thread state')
         check(rpc('thread/resume', {'threadId': 'desktop-1'})['error']['code'] == -32009, 'foreign thread cannot be resumed in independent process')
         check(rpc('command/exec', {'command': 'anything'})['error']['code'] == -32601, 'arbitrary command RPC blocked')

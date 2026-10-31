@@ -20,7 +20,7 @@ open dist/AnywhereHost.app
 ```
 
 The script performs a clean Release build, assembles a fresh bundle in `dist`,
-and signs both helpers and the application with Hardened Runtime. Local signing
+and signs the service, permission probe, frpc and the application with Hardened Runtime. Local signing
 defaults to ad hoc. `ANYWHERE_SIGNING_IDENTITY` selects an available signing
 identity, including a Developer ID Application certificate for direct distribution.
 Xcode uses manual ad-hoc signing by default; a signing identity can also be selected
@@ -48,7 +48,7 @@ identity, events, tunnel settings and optional APNs keys all use this directory.
 python3 Scripts/verify-app.py dist/AnywhereHost.app --integration
 ```
 
-The build script always verifies all three signatures, Hardened Runtime and the
+The build script always verifies all four executable signatures, Hardened Runtime and the
 absence of App Sandbox/inheritance entitlements or a provisioning profile. The
 optional integration check starts the **packaged Rust executable** with disposable
 state and a deterministic Codex peer. It exercises HTTPS/WSS, native permission

@@ -1,14 +1,12 @@
-# AnywhereHost API v1
+# AnywhereHost API — security protocol v2
 
-Base URL: `https://host:port`. Native clients authenticate **every** HTTP request and WebSocket upgrade with `Authorization: Bearer <host-token>`. Credentials in query strings are unsupported. Browser `Origin` requests and redirects are rejected. Responses are not cacheable.
-
-The connection QR encodes:
+Base URL: `https://host:port`, TLS 1.3 with exact leaf-certificate SHA-256 pinning, including custom/self-signed certificates. Every business HTTP request and WSS upgrade requires a request-bound signature; shared bearer credentials are rejected. See [Security v2](SECURITY-V2.md) for the exact wire proof and threat model.
 
 ```text
-anywhere-host://connect?v=1&endpoint=<percent-encoded-https-url>&token=<64-hex-token>&certificateSHA256=<64-hex-fingerprint>
+anywhere-host://connect?v=2&endpoint=<percent-encoded-https-url>&ticket=<one-use-64-hex-ticket>&certificateSHA256=<64-hex-fingerprint>
 ```
 
-Verify the actual leaf certificate DER SHA-256 against this fingerprint before sending credentials. Never implement a blanket “trust any certificate” switch. frpc forwards the encrypted HTTPS stream; frps does not replace the Host certificate. Anyone holding the credential has access to the Host's exposed operations; v1 does not implement user/device roles.
+`GET /v1/security/challenge` is public. `POST /v1/security/pair` requires the ticket and device-key possession proof. Management-signed endpoints: `POST /v1/security/ticket`, `GET /v1/security/devices`, `POST /v1/security/devices/revoke` (`{"deviceID":"…"}`), and all `/v1/tunnel` routes. Business endpoint paths below are retained as resource names; there is no old authentication fallback.
 
 ## Endpoints
 
@@ -27,6 +25,7 @@ Verify the actual leaf certificate DER SHA-256 against this fingerprint before s
 | `POST /v1/runtime/connect` | Reconnect a disconnected Codex transport; does not restart an existing daemon |
 | `GET /v1/projects/{projectId}/files?path=relative&root=0` | Directory entries under an authoritative project root |
 | `GET /v1/projects/{projectId}/file?path=relative&root=0` | UTF-8 file contents, up to 2 MiB |
+| `GET /v1/projects/{projectId}/image?path=relative&root=0` | PNG/JPEG/GIF/WebP/HEIC/TIFF/BMP image bytes, up to 12 MiB; JSON `{path,mimeType,dataBase64}` |
 | `GET /v1/projects/{projectId}/git?root=0` | Git porcelain status, staged/unstaged diffs, up to 4 MiB each |
 | `GET /v1/tunnel` | frpc process state, saved configuration without credentials, recent diagnostics; not proof of internet reachability |
 | `POST /v1/tunnel` | Validate and start bundled frpc with explicit configuration |
@@ -129,9 +128,11 @@ Permission settings remain native, including `sandboxPolicy: {type: dangerFullAc
 ## 远程桌面
 
 - `GET /v1/desktop`：`supported`、`enabled`、`reachable`、`protocol: "rfb"`、`engine: "noVNC"`、`activeSessions`。独立于 Codex 运行时可用性。
-- `GET /v1/desktop/socket`：WebSocket Upgrade，认证沿用 Host Bearer，禁止浏览器 Origin。仅接受二进制 RFB，转发到固定 `127.0.0.1:5900`；不接受远端目标地址或 shell 字符串。最多两个会话，消息最多 1 MiB。关闭开关时最多约一秒撤销当前连接。
+- `GET /v1/desktop/socket`：WebSocket Upgrade，认证使用设备请求签名，禁止浏览器 Origin。仅接受二进制 RFB，转发到固定 `127.0.0.1:5900`；不接受远端目标地址或 shell 字符串。最多两个会话，消息最多 1 MiB。关闭开关时最多约一秒撤销当前连接。
 - `/v1/capabilities.remoteDesktop`：`supported: true`、`protocol: "rfb"`、`transport: "native-wss"` 表示后端实现，不代表屏幕共享已开启或用户已通过屏幕共享认证。
 
 开关由本机 SwiftUI 控制台保存到状态目录 `desktop.json`：`{"enabled":true}`。文件缺失、无效或关闭时拒绝连接。远程 API 不提供启用操作；在 Mac 控制台开启后无需重启。系统“屏幕共享”需另行开启并配置允许访问的用户。
 
 屏幕流通过现有 HTTPS/WSS 隧道传输，不进入 Codex 事件、历史或数据库。客户端使用 noVNC 自带的 RFB 认证，不在 Host 保存 Mac 登录密码。
+
+Project images require the same bearer authentication and canonical project-root checks as text files. The additive `images.projectRead` and `images.maxBytes` capabilities describe support. Image reads reject non-image signatures, directories, oversized files, absolute paths and symlinks outside the project. Clients resolve absolute Markdown image links against project roots before calling this endpoint.

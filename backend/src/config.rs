@@ -56,7 +56,7 @@ pub fn prepare(dir: &Path) -> Result<(Config, String, String)> {
         private_write(&path, &serde_json::to_vec_pretty(&config)?)?;
         config
     };
-    let token_path = dir.join("access-token");
+    let token_path = dir.join("admin-key-v2");
     if !token_path.exists() {
         let mut bytes = [0u8; 32];
         use std::io::Read;
@@ -73,7 +73,7 @@ pub fn prepare(dir: &Path) -> Result<(Config, String, String)> {
     let token = fs::read_to_string(token_path)?.trim().to_owned();
     ensure!(
         token.len() == 64 && token.bytes().all(|c| c.is_ascii_hexdigit()),
-        "invalid access-token"
+        "invalid admin-key-v2"
     );
     let cert = dir.join("host-cert.pem");
     let key = dir.join("host-key.pem");
@@ -114,6 +114,8 @@ pub fn prepare(dir: &Path) -> Result<(Config, String, String)> {
         private_write(&key, &fs::read(temporary.path().join("key.pem"))?)?;
         private_write(&cert, &fs::read(temporary.path().join("cert.pem"))?)?;
     }
+    fs::set_permissions(&key, fs::Permissions::from_mode(0o600))?;
+    fs::set_permissions(&cert, fs::Permissions::from_mode(0o600))?;
     let output = std::process::Command::new("/usr/bin/openssl")
         .args(["x509", "-outform", "DER", "-in"])
         .arg(cert)

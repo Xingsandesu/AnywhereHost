@@ -103,7 +103,7 @@ impl Tunnel {
             })
         });
         json!({"state":state,"exitCode":exit,"bundled":self.binary.exists(),"config":settings,"logTail":log,
-            "note":"running 表示 frpc 进程存活；连接结果请查看日志，公网可达性需从 iPhone 验证。"})
+            "note":"running 表示 frpc 进程存活；连接结果请查看日志，公网可达性需从远程设备验证。"})
     }
     pub async fn start(&self, mut config: TunnelConfig) -> Result<Value> {
         let mut slot = self.child.lock().await;

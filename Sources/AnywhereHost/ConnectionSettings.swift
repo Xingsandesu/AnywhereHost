@@ -4,7 +4,6 @@ import CoreImage.CIFilterBuiltins
 
 struct ConnectionSettings: View {
     @Bindable var store: HostStore
-    @Environment(\.dismiss) private var dismiss
     @State private var server = ""
     @State private var serverPort = "7000"
     @State private var remotePort = "9443"
@@ -14,81 +13,92 @@ struct ConnectionSettings: View {
     @State private var link: String?
     @State private var qr: NSImage?
     @State private var loading = true
+    @State private var deviceIDs: [String] = []
     private var canReuseToken: Bool {
         let saved = store.tunnel["config"]
         return saved["hasToken"].bool && saved["server"].string == server.trimmingCharacters(in: .whitespacesAndNewlines)
             && Self.portText(saved["serverPort"]) == serverPort
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack { Text("连接 iPhone Duo").font(.title2.bold()); Spacer(); Button("完成") { dismiss() } }
-            Text("内置 frpc 将加密的 Host 端口转发到你自己的 frps 服务器。连接信息包含访问凭证，只分享给自己的设备。")
-                .foregroundStyle(.secondary)
+        HostSheet(title: "连接设备") {
             Form {
-                Section("内网穿透") {
-                    TextField("frps 地址", text: $server)
-                    TextField("frps 控制端口（serverPort）", text: $serverPort)
-                    TextField("Host 映射端口（remotePort）", text: $remotePort)
-                    Text("控制端口填写服务商给出的 serverPort；映射端口是 iPhone 访问 Host 的端口，必须另外选择并在服务器上放行。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    SecureField("frps Token", text: $token, prompt: Text(canReuseToken ? "已保存，留空继续使用" : "输入服务器 token"))
-                    TextField("frps CA 文件路径（可选）", text: $caPath)
-                    Text("CA 留空使用 frp 默认 TLS 加密，不验证 frps 证书。填写 CA 可验证服务器身份；Host 的 HTTPS 始终校验证书指纹。")
-                        .font(.caption).foregroundStyle(.secondary)
+                Section("隧道") {
+                    TextField("服务器", text: $server, prompt: Text("frps.example.com"))
+                    TextField("控制端口", text: $serverPort)
+                    TextField("映射端口", text: $remotePort)
+                    SecureField("访问令牌", text: $token, prompt: Text(canReuseToken ? "已保存" : "Token"))
+                    TextField("CA 证书", text: $caPath, prompt: Text("可选"))
+                    LabeledContent("状态") { TunnelStateLabel(state: store.tunnel["state"].string) }
                     HStack {
-                        TunnelStateLabel(state: store.tunnel["state"].string)
-                        Spacer()
-                        Button("启动隧道") {
+                        Button("启动隧道", systemImage: "network") { startTunnel() }
+                            .disabled(loading || store.client == nil || store.busy || server.isEmpty || (token.isEmpty && !canReuseToken) || store.tunnel["state"].string == "running")
+                        Button("停止") {
                             Task { await store.perform {
-                                guard let control = UInt16(serverPort), control > 0, let remote = UInt16(remotePort), remote > 0 else { throw HostFailure(message: "端口应为 1–65535") }
-                                guard let client = store.client else { throw HostFailure(message: "主机服务尚未连接") }
-                                store.error = nil
-                                do {
-                                    _ = try await client.request("v1/tunnel", body: .object([
-                                    "server": .string(server), "serverPort": .number(Double(control)), "remotePort": .number(Double(remote)), "token": .string(token), "trustedCaFile": caPath.isEmpty ? .null : .string(caPath)
-                                ]))
-                                } catch {
-                                    await store.refresh()
-                                    throw error
-                                }
-                                endpoint = Self.remoteURL(server: server, port: remote)
-                                token = ""
+                                _ = try await store.client?.request("v1/tunnel/stop", body: .object([:]))
                                 await store.refresh()
                             } }
-                        }.disabled(loading || store.busy || server.isEmpty || (token.isEmpty && !canReuseToken) || store.tunnel["state"].string == "running")
-                        Button("停止") { Task { await store.perform { _ = try await store.client?.request("v1/tunnel/stop", body: .object([:])); await store.refresh() } } }.disabled(store.busy)
+                        }.disabled(store.busy || store.client == nil || store.tunnel["state"].string != "running")
                     }
                 }
-                Section("连接诊断") {
-                    TunnelDiagnostics(log: store.tunnel["logTail"].string ?? "", error: store.error)
-                }
-                Section("设备连接") {
-                    TextField("HTTPS 远程地址", text: $endpoint, prompt: Text("https://your-host:9443"))
-                    Button("生成连接二维码") {
-                        do {
-                            guard let client = store.client else { return }
-                            let result = try client.pairingLink(endpoint: endpoint)
-                            link = result; qr = Self.makeQR(result)
-                        } catch { store.error = error.localizedDescription }
+                Section("配对") {
+                    TextField("远程地址", text: $endpoint, prompt: Text("https://your-host:9443"))
+                    Button("生成二维码", systemImage: "qrcode") {
+                        Task { await generatePairing() }
+                    }.disabled(store.client == nil || endpoint.isEmpty || store.busy)
+                    if let qr, let link {
+                        VStack(spacing: 16) {
+                            Image(nsImage: qr).interpolation(.none).resizable().scaledToFit()
+                                .frame(width: 180, height: 180).padding(12)
+                                .background(.white, in: .rect(cornerRadius: 16))
+                                .accessibilityLabel("设备配对二维码")
+                            Button("复制连接链接", systemImage: "link") {
+                                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string)
+                            }
+                        }.frame(maxWidth: .infinity).padding(.vertical, 12)
                     }
+                }
+                if !deviceIDs.isEmpty {
+                    Section("已配对设备") {
+                        ForEach(deviceIDs, id: \.self) { id in
+                            HStack {
+                                Text("设备 \(id.prefix(12))").font(.caption.monospaced())
+                                Spacer()
+                                Button("撤销连接", role: .destructive) {
+                                    Task { await store.perform {
+                                        _ = try await store.client?.request("v1/security/devices/revoke", body: .object(["deviceID": .string(id)]))
+                                        await loadDevices()
+                                    } }
+                                }.disabled(store.busy)
+                            }
+                        }
+                    }
+                }
+                Section {
+                    DisclosureGroup("连接诊断") {
+                        TunnelDiagnostics(log: store.tunnel["logTail"].string ?? "")
+                        Button("打开日志", systemImage: "doc.text") {
+                            NSWorkspace.shared.open(store.process.stateDirectory.appending(path: "frpc.log"))
+                        }
+                    }
+                }
+                if let error = store.error {
+                    Text(error).foregroundStyle(.red).textSelection(.enabled)
                 }
             }.formStyle(.grouped)
-            if let qr, let link {
-                HStack(spacing: 20) {
-                    Image(nsImage: qr).interpolation(.none).resizable().scaledToFit().frame(width: 180, height: 180).padding(10).background(.white)
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Anywhere Host · 协议 v1").font(.headline)
-                        Text("包含 HTTPS 地址、访问令牌和证书指纹。请在 iPhone 的 Anywhere 中导入。").foregroundStyle(.secondary)
-                        Button("复制连接链接") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) }
-                    }
-                }
+        }
+        .frame(width: 560, height: 640)
+        .task {
+            while !Task.isCancelled {
+                await loadDevices()
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
-            HStack {
-                Button("打开隧道日志") { NSWorkspace.shared.open(store.process.stateDirectory.appending(path: "frpc.log")) }
-                Spacer()
-                Text("默认只监听本机 · TLS 证书固定验证").font(.caption).foregroundStyle(.secondary)
-            }
-        }.padding(24).frame(width: 720, height: qr == nil ? 680 : 870)
+        }
+        .task(id: link) {
+            guard link != nil else { return }
+            do { try await Task.sleep(for: .seconds(240)) } catch { return }
+            await generatePairing()
+        }
+        .onChange(of: endpoint) { _, _ in link = nil; qr = nil }
         .task {
             defer { loading = false }
             guard let client = store.client else { return }
@@ -103,6 +113,41 @@ struct ConnectionSettings: View {
                 if let port = UInt16(remotePort) { endpoint = Self.remoteURL(server: address, port: port) }
             } catch { store.error = error.localizedDescription }
         }
+    }
+    private func generatePairing() async {
+        await store.perform {
+            guard let client = store.client else { return }
+            let requestedEndpoint = endpoint
+            let result = try await client.pairingLink(endpoint: requestedEndpoint)
+            guard !Task.isCancelled, endpoint == requestedEndpoint else { return }
+            link = result; qr = Self.makeQR(result)
+        }
+    }
+    private func loadDevices() async {
+        if let result = try? await store.client?.request("v1/security/devices"), case .array(let ids) = result["devices"] {
+            deviceIDs = ids.compactMap(\.string).sorted()
+            if result["pairingConsumed"].bool && link != nil { await generatePairing() }
+        }
+    }
+    private func startTunnel() {
+        Task { await store.perform {
+            guard let control = UInt16(serverPort), control > 0,
+                  let remote = UInt16(remotePort), remote > 0 else { throw HostFailure(message: "端口应为 1–65535") }
+            guard let client = store.client else { throw HostFailure(message: "主机服务尚未连接") }
+            store.error = nil
+            do {
+                _ = try await client.request("v1/tunnel", body: .object([
+                    "server": .string(server), "serverPort": .number(Double(control)), "remotePort": .number(Double(remote)),
+                    "token": .string(token), "trustedCaFile": caPath.isEmpty ? .null : .string(caPath)
+                ]))
+            } catch {
+                await store.refresh()
+                throw error
+            }
+            endpoint = Self.remoteURL(server: server, port: remote)
+            token = ""
+            await store.refresh()
+        } }
     }
     private static func portText(_ value: JSONValue) -> String? {
         if case .number(let port) = value, let port = UInt16(exactly: port) { return String(port) }
@@ -121,29 +166,31 @@ struct ConnectionSettings: View {
 }
 
 
-private struct TunnelStateLabel: View {
+struct TunnelStateLabel: View {
     let state: String?
     var body: some View {
         switch state {
-        case "running": Label("frpc 运行中", systemImage: "network")
+        case "running": Label("运行中", systemImage: "network")
         case "exited": Label("连接已退出", systemImage: "exclamationmark.triangle")
         case "unknown": Label("状态未知", systemImage: "questionmark.circle")
-        default: Label("未启动", systemImage: "network.slash")
+        case "stopped": Label("未启动", systemImage: "network.slash")
+        case nil: Label("未连接", systemImage: "network.slash")
+        default: Label("状态未知", systemImage: "questionmark.circle")
         }
     }
 }
 
 private struct TunnelDiagnostics: View {
     let log: String
-    let error: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if log.isEmpty {
-                Text("启动后会显示认证和端口映射结果。").foregroundStyle(.secondary)
+                Text("暂无日志").foregroundStyle(.secondary)
             } else {
                 Text(verbatim: log).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }
         }
     }
 }
+
+#Preview("连接设备") { ConnectionSettings(store: HostStore()) }

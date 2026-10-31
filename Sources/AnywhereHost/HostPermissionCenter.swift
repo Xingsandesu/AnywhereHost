@@ -23,18 +23,6 @@ enum DirectoryPermissionState: Equatable, Sendable {
         case .timedOut: "检查超时"
         }
     }
-    var detail: LocalizedStringResource {
-        switch self {
-        case .unchecked: "检查会读取目录，并创建后删除临时文件，不读取或修改已有文件。"
-        case .checking: "如出现系统授权提示，请允许访问；完成后可重新检查。"
-        case .ready: "当前 Host 可以读取和写入此目录。"
-        case .readOnly: "无法写入或删除临时文件。请检查目录权限、系统授权和磁盘状态。"
-        case .denied: "请在系统设置的“文件与文件夹”或“完全磁盘访问权限”中允许当前应用。"
-        case .missing: "请确认目录位置；外置磁盘或网络卷可能尚未连接。"
-        case .unavailable: "请确认路径、磁盘状态和 Host 安装是否完整。"
-        case .timedOut: "请处理系统授权提示，必要时重新打开应用，再检查一次。"
-        }
-    }
 }
 
 struct DirectoryAccessResult: Decodable, Sendable {
@@ -127,13 +115,12 @@ struct DirectoryAccessResult: Decodable, Sendable {
     // Skipping does not record completion, so the next launch offers setup again.
     func deferOnboarding() { showOnboarding = false }
 
-    func configure(stateDirectory: URL, codexHome: String?, projectRoots: [String]) {
+    func configure(stateDirectory: URL, codexHome: String?) {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let actualCodexHome = codexHome ?? ProcessInfo.processInfo.environment["CODEX_HOME"] ?? home.appending(path: ".codex").path
         var targets = [PermissionDirectory(path: stateDirectory.path, title: String(localized: "主机数据"), required: true),
                        PermissionDirectory(path: actualCodexHome, title: "Codex Home", required: true)]
-        if let selectedDirectory { targets.append(.init(path: selectedDirectory, title: String(localized: "选择的项目目录"), required: true)) }
-        targets += projectRoots.map { .init(path: $0, title: String(localized: "项目目录"), required: true) }
+        if let selectedDirectory { targets.append(.init(path: selectedDirectory, title: String(localized: "所选目录"), required: true)) }
         let folders: [(String, LocalizedStringResource)] = [("Documents", "文稿"), ("Desktop", "桌面"), ("Downloads", "下载")]
         targets += folders.map { .init(path: home.appending(path: $0.0).path, title: String(localized: $0.1), required: false) }
         var seen = Set<String>()

@@ -34,18 +34,19 @@ import Testing
     }
     @Test func duplicatePathsKeepRequiredStatus() async {
         await withDefaults { defaults in
-            let center = HostPermissionCenter(defaults: defaults)
             let path = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Documents").path
-            center.configure(stateDirectory: URL(fileURLWithPath: "/tmp/state"), codexHome: "/tmp/codex", projectRoots: [path, path])
+            defaults.set(path, forKey: "hostPermissionDirectory")
+            let center = HostPermissionCenter(defaults: defaults)
+            center.configure(stateDirectory: URL(fileURLWithPath: "/tmp/state"), codexHome: "/tmp/codex")
             #expect(center.directories.filter { $0.path == path }.count == 1)
             #expect(center.directories.first { $0.path == path }?.required == true)
             #expect(!center.canFinishChecks)
         }
     }
-    @Test func successfulSetupPersistsButRevocationAndNewProjectsNeedChecks() async throws {
+    @Test func successfulSetupPersistsButRevocationAndChangedPathsNeedChecks() async throws {
         try await withDefaults { defaults in
             let center = HostPermissionCenter(defaults: defaults)
-            center.configure(stateDirectory: URL(fileURLWithPath: "/tmp/state"), codexHome: "/tmp/codex", projectRoots: [])
+            center.configure(stateDirectory: URL(fileURLWithPath: "/tmp/state"), codexHome: "/tmp/codex")
             let fixture = try makeProbe("printf '%s' '{\"readable\":true,\"writable\":true,\"issue\":null}'")
             defer { try? FileManager.default.removeItem(at: fixture.deletingLastPathComponent()) }
             await center.checkAll(using: DirectoryPermissionProbe(executable: fixture), includeOptional: false)
@@ -53,7 +54,7 @@ import Testing
             #expect(center.passedCount == 2)
             center.completeOnboarding()
             #expect(!HostPermissionCenter(defaults: defaults).showOnboarding)
-            center.configure(stateDirectory: URL(fileURLWithPath: "/tmp/state"), codexHome: "/tmp/codex", projectRoots: ["/tmp/new-project"])
+            center.configure(stateDirectory: URL(fileURLWithPath: "/tmp/state"), codexHome: "/tmp/new-codex")
             #expect(!center.canFinishChecks)
             await center.checkAll(using: DirectoryPermissionProbe(executable: URL(fileURLWithPath: "/usr/bin/false")))
             #expect(!center.canFinishChecks)
@@ -70,7 +71,7 @@ import Testing
         #expect(clock.now - start < .seconds(3))
         try await withDefaults { defaults in
             let center = HostPermissionCenter(defaults: defaults)
-            center.configure(stateDirectory: URL(fileURLWithPath: "/tmp/state"), codexHome: "/tmp/codex", projectRoots: [])
+            center.configure(stateDirectory: URL(fileURLWithPath: "/tmp/state"), codexHome: "/tmp/codex")
             for cancelViaButton in [true, false] {
                 let task = Task { await center.checkAll(using: DirectoryPermissionProbe(executable: fixture)) }
                 try await Task.sleep(for: .milliseconds(150))

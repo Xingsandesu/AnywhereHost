@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from security_wire import admin_headers
 """Real frpc/frps regression checks. All listeners and connections use loopback."""
 import http.client
 import json
@@ -42,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-frp-') as temporary:
         connection.connect()
         assert connection.sock.getpeercert(binary_form=True) == ssl.PEM_cert_to_DER_cert((directory / 'host-cert.pem').read_text())
         connection.request('GET' if body is None else 'POST', path, None if body is None else json.dumps(body), {
-            'Authorization': 'Bearer ' + (directory / 'access-token').read_text(), 'Content-Type': 'application/json',
+            **admin_headers(listen,(directory/'admin-key-v2').read_text(),ssl.PEM_cert_to_DER_cert((directory/'host-cert.pem').read_text()),'GET' if body is None else 'POST',path,None if body is None else json.dumps(body)), 'Content-Type': 'application/json',
         })
         response = connection.getresponse()
         value = json.loads(response.read())

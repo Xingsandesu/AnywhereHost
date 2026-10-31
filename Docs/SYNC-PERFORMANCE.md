@@ -1,7 +1,5 @@
 # 同步性能与兼容协议
 
-2026-10-28：与相邻 AnyWhereCoding 客户端的同步调度优化配套。
-
 ## HTTP 压缩
 
 Router 使用 `tower-http` 的 `CompressionLayer`，仅启用 gzip。通过 `Accept-Encoding` 协商，不支持压缩的客户端保持原有 JSON；小响应及 WebSocket Upgrade 遵循库的默认谓词。认证、证书固定验证和 `cache-control: no-store` 不变。参考 [tower-http CompressionLayer](https://docs.rs/tower-http/latest/tower_http/compression/struct.CompressionLayer.html)。
@@ -30,5 +28,3 @@ Router 使用 `tower-http` 的 `CompressionLayer`，仅启用 gzip。通过 `Acc
 - `streaming.rs`：UTF-8 位置、跨会话隔离、命令前缀、完成清理、缺失 started 不伪造位置。
 - `Scripts/verify-host.py`：真实 HTTPS 的 gzip/identity 协商与正文一致性；WSS delta 位置在 journal 重放后保持不变。
 - 相邻客户端 `HostSynchronizationTests.swift`：并发加载、请求合并、快照/事件重叠、Unicode、旧 Host、完成事件与取消行为。
-
-2026-10-29 在正常开发环境完成标准回归：14 项 `cargo test`、`cargo clippy --all-targets -- -D warnings`、`cargo build`、44 项 `python3 Scripts/verify-host.py` HTTPS/WSS 集成检查及 `swift build` 全部通过；Cargo 已更新压缩依赖锁文件。相邻客户端的 46 项 iOS 测试全部通过（参数化展开共 50 次，0 跳过），包含双 Host HTTPS/WSS 与公网证书固定验证。尚未替换正在运行的 Host，不能将测试通过等同于生产性能收益已验证。

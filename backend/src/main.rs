@@ -1,4 +1,6 @@
 mod api;
+mod security;
+mod ingress;
 mod apns;
 mod codex;
 mod config;
@@ -56,6 +58,7 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| exe.parent().unwrap().join("frpc"));
     let state = Arc::new(api::AppState {
+        security: security::Security::open(dir.join("devices-v2.json"))?,
         desktop: desktop::Desktop::new(dir.join("desktop.json")),
         token,
         fingerprint,
@@ -69,12 +72,14 @@ async fn main() -> Result<()> {
         tunnel: tunnel::Tunnel::new(frpc, dir.clone(), config.listen.port()),
     });
     live_activity::start(state.clone());
-    let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(
-        dir.join("host-cert.pem"),
-        dir.join("host-key.pem"),
-    )
-    .await
-    .context("load TLS identity")?;
+    let certificates = rustls_pemfile::certs(&mut std::io::BufReader::new(std::fs::File::open(dir.join("host-cert.pem"))?)).collect::<Result<Vec<_>,_>>()?;
+    let key = rustls_pemfile::private_key(&mut std::io::BufReader::new(std::fs::File::open(dir.join("host-key.pem"))?))?.context("missing TLS private key")?;
+    let mut tls_config = rustls::ServerConfig::builder_with_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .with_protocol_versions(&[&rustls::version::TLS13])?
+        .with_no_client_auth().with_single_cert(certificates,key)?;
+    tls_config.max_early_data_size = 0;
+    tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    let tls = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(tls_config));
     let handle = axum_server::Handle::new();
     let stop_handle = handle.clone();
     let stop_state = state.clone();
@@ -93,8 +98,13 @@ async fn main() -> Result<()> {
         let _ = api::connect_runtime(&connect_state).await;
     });
     eprintln!("AnywhereHost listening on https://{}", config.listen);
-    axum_server::bind_rustls(config.listen, tls)
-        .handle(handle)
+    let mut server = axum_server::bind_rustls(config.listen, tls)
+        .map(|acceptor| acceptor.handshake_timeout(std::time::Duration::from_secs(5)).acceptor(ingress::ConnectionLimit::new()))
+        .handle(handle);
+    server.http_builder().http1().timer(hyper_util::rt::TokioTimer::new())
+        .header_read_timeout(std::time::Duration::from_secs(10)).max_headers(48).max_buf_size(32768);
+    server.http_builder().http2().max_concurrent_streams(32).max_header_list_size(16384);
+    server
         .serve(api::router(state).into_make_service())
         .await?;
     Ok(())

@@ -28,9 +28,6 @@ enum JSONValue: Codable, Sendable, Equatable {
     subscript(_ key: String) -> JSONValue { if case .object(let v) = self { return v[key] ?? .null }; return .null }
     var string: String? { if case .string(let v) = self { return v }; return nil }
     var bool: Bool { if case .bool(let v) = self { return v }; return false }
-    var array: [JSONValue] { if case .array(let v) = self { return v }; return [] }
-    var objectValue: [String: JSONValue] { if case .object(let v) = self { return v }; return [:] }
-    var pretty: String { let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]; return (try? String(decoding: e.encode(self), as: UTF8.self)) ?? "" }
 }
 struct HostFailure: LocalizedError { let message: String; var errorDescription: String? { message } }
 
@@ -51,13 +48,22 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskD
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
-final class HostClient: Sendable {
+protocol HostConnection: Sendable {
+    func request(_ path: String, body: JSONValue?) async throws -> JSONValue
+    func pairingLink(endpoint: String) async throws -> String
+}
+
+extension HostConnection {
+    func request(_ path: String) async throws -> JSONValue { try await request(path, body: nil) }
+}
+
+final class HostClient: HostConnection {
     let base: URL
     let token: String
     let fingerprint: String
     private let session: URLSession
     init(stateDirectory: URL) throws {
-        token = try String(contentsOf: stateDirectory.appending(path: "access-token"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        token = try String(contentsOf: stateDirectory.appending(path: "admin-key-v2"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
         let pem = try String(contentsOf: stateDirectory.appending(path: "host-cert.pem"), encoding: .utf8)
         let body = pem.components(separatedBy: .newlines).filter { !$0.hasPrefix("-----") }.joined()
         guard let der = Data(base64Encoded: body) else { throw HostFailure(message: "无法读取主机证书") }
@@ -68,17 +74,35 @@ final class HostClient: Sendable {
         base = URL(string: "https://127.0.0.1:\(port)")!
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 70
+        configuration.tlsMinimumSupportedProtocolVersion = .TLSv13
+        configuration.urlCredentialStorage = nil; configuration.urlCache = nil
         configuration.httpShouldSetCookies = false
         session = URLSession(configuration: configuration, delegate: PinnedSessionDelegate(fingerprint: fingerprint), delegateQueue: nil)
     }
     func request(_ path: String, body: JSONValue? = nil) async throws -> JSONValue {
         var request = URLRequest(url: base.appending(path: path))
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(body)
         }
+        let (challengeData, challengeResponse) = try await session.data(from: base.appending(path: "v1/security/challenge"))
+        let challenge = try JSONDecoder().decode(JSONValue.self, from: challengeData)
+        guard (challengeResponse as? HTTPURLResponse)?.statusCode == 200,
+              let nonce = challenge["challenge"].string,
+              case .number(let serverTime) = challenge["serverTime"] else { throw HostFailure(message: "主机安全握手失败") }
+        let timestamp = String(Int64(serverTime))
+        let requestID = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        let target = components.percentEncodedPath + (components.percentEncodedQuery.map { "?" + $0 } ?? "")
+        let digest = SHA256.hash(data: request.httpBody ?? Data()).map { String(format: "%02x", $0) }.joined()
+        let canonical = ["Anywhere-v2", fingerprint, "Anywhere-Admin", request.httpMethod ?? "GET", target, digest, timestamp, requestID, nonce].joined(separator: "\n")
+        request.setValue(digest, forHTTPHeaderField: "X-Anywhere-Content-SHA256")
+        request.setValue("Anywhere-Admin", forHTTPHeaderField: "Authorization")
+        request.setValue(nonce, forHTTPHeaderField: "X-Anywhere-Challenge")
+        request.setValue(timestamp, forHTTPHeaderField: "X-Anywhere-Time")
+        request.setValue(requestID, forHTTPHeaderField: "X-Anywhere-Nonce")
+        request.setValue(Data(HMAC<SHA256>.authenticationCode(for: Data(canonical.utf8), using: SymmetricKey(data: Data(token.utf8)))).base64EncodedString(), forHTTPHeaderField: "X-Anywhere-Signature")
         let (data, response) = try await session.data(for: request)
         let value = try JSONDecoder().decode(JSONValue.self, from: data)
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
@@ -86,27 +110,15 @@ final class HostClient: Sendable {
         }
         return value
     }
-    func rpc(_ method: String, _ params: [String: JSONValue] = [:]) async throws -> JSONValue {
-        let response = try await request("v1/rpc", body: .object(["method": .string(method), "params": .object(params)]))
-        if response["error"] != .null { throw HostFailure(message: response["error"]["message"].string ?? "Codex 请求失败") }
-        return response["result"]
-    }
-    func socket(after: Int, epoch: String?) -> URLSessionWebSocketTask {
-        var components = URLComponents(url: base.appending(path: "v1/events"), resolvingAgainstBaseURL: false)!
-        components.scheme = "wss"
-        components.queryItems = [URLQueryItem(name: "after", value: String(after))]
-        if let epoch { components.queryItems?.append(URLQueryItem(name: "epoch", value: epoch)) }
-        var request = URLRequest(url: components.url!)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        return session.webSocketTask(with: request)
-    }
-    func pairingLink(endpoint: String) throws -> String {
-        guard let url = URL(string: endpoint), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else {
+    func pairingLink(endpoint: String) async throws -> String {
+        guard let url = URL(string: endpoint), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil, url.query == nil, (url.path.isEmpty || url.path == "/"), url.fragment == nil else {
             throw HostFailure(message: "请输入 https://主机:端口 格式的远程地址")
         }
+        let ticket = try await request("v1/security/ticket", body: .object([:]))
+        guard let secret = ticket["ticket"].string else { throw HostFailure(message: "无法生成配对二维码") }
         var link = URLComponents()
         link.scheme = "anywhere-host"; link.host = "connect"
-        link.queryItems = [URLQueryItem(name: "v", value: "1"), URLQueryItem(name: "endpoint", value: endpoint), URLQueryItem(name: "token", value: token), URLQueryItem(name: "certificateSHA256", value: fingerprint)]
+        link.queryItems = [URLQueryItem(name: "v", value: "2"), URLQueryItem(name: "endpoint", value: endpoint), URLQueryItem(name: "ticket", value: secret), URLQueryItem(name: "certificateSHA256", value: fingerprint)]
         return link.string!
     }
 }

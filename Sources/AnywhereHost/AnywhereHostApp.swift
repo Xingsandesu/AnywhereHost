@@ -4,23 +4,7 @@ import SwiftUI
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = HostStore()
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps: true)
-        if let flag = CommandLine.arguments.firstIndex(of: "--snapshot"), CommandLine.arguments.count > flag + 1 {
-            let path = CommandLine.arguments[flag + 1]
-            Task {
-                for _ in 0..<40 {
-                    try? await Task.sleep(for: .milliseconds(250))
-                    if store.connected { break }
-                }
-                try? await Task.sleep(for: .milliseconds(500))
-                guard let view = NSApp.windows.first(where: { $0.contentView != nil && $0.frame.width > 600 })?.contentView,
-                      let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-                view.effectiveAppearance.performAsCurrentDrawingAppearance {
-                    view.cacheDisplay(in: view.bounds, to: bitmap)
-                }
-                if let png = bitmap.representation(using: .png, properties: [:]) { try? png.write(to: URL(fileURLWithPath: path)) }
-            }
-        }
+        NSApp.setActivationPolicy(.regular); NSApp.activate()
     }
     func applicationWillTerminate(_ notification: Notification) { store.stop() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -30,11 +14,12 @@ import SwiftUI
     var body: some Scene {
         Window("Anywhere Host", id: "host") {
             HostSetupRootView(store: delegate.store)
-                .frame(minWidth: 960, minHeight: 640)
+                .frame(minWidth: 600, maxWidth: 800, minHeight: 600, maxHeight: 800)
         }
-        .defaultSize(width: 1180, height: 780)
+        .defaultSize(width: 680, height: 640)
+        .windowResizability(.contentSize)
         .commands { CommandGroup(replacing: .newItem) {} }
-        MenuBarExtra("Anywhere Host", systemImage: "laptopcomputer.and.iphone") {
+        MenuBarExtra("Anywhere Host", systemImage: "desktopcomputer") {
             HostMenu(store: delegate.store)
         }
     }
@@ -44,14 +29,14 @@ struct HostMenu: View {
     var store: HostStore
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Text(store.runtimeLabel)
-        Button("显示主机控制台") { openWindow(id: "host"); NSApp.activate(ignoringOtherApps: true) }
-        Button("权限检查…") {
-            openWindow(id: "host"); NSApp.activate(ignoringOtherApps: true)
+        Text(store.serviceAvailable ? "主机运行中" : "主机未连接")
+        Button("打开主机") { openWindow(id: "host"); NSApp.activate() }
+        Button("权限…") {
+            openWindow(id: "host"); NSApp.activate()
             store.permissions.openPermissions()
         }
-        Button("重新查看使用引导…") {
-            openWindow(id: "host"); NSApp.activate(ignoringOtherApps: true)
+        Button("设置向导…") {
+            openWindow(id: "host"); NSApp.activate()
             store.permissions.openOnboarding()
         }
         Divider()

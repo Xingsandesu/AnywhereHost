@@ -1,92 +1,81 @@
 # Verification
 
-## Direct distribution — 2026-10-29
+## Source checks
 
-- Removed App Sandbox and inherited-helper entitlements, folder bookmarks and
-  authorization gates, runtime sandbox detection and `externalSandbox` overrides.
-  Store upload instructions and the signed sandbox verification harness were removed.
-- App and CLI use `~/Library/Application Support/AnywhereHost`. There is no
-  legacy-container fallback, import or migration. The direct-distribution Host is
-  now running from the standard state directory; paired-certificate verification
-  confirmed the path. APNs credentials were explicitly configured there, and an
-  isolated process successfully loaded both environments. The running process
-  still needs a restart to load this configuration; no user thread data was copied.
-- `cargo test --locked`: 23 tests passed. `cargo clippy --locked --all-targets --
-  -D warnings`, `cargo build --locked` and `swift build` passed.
-- `Scripts/verify-host.py`: 63 HTTPS/WSS checks passed. Tests observe the Codex
-  peer's actual requests for default and explicit permissions through start, fork,
-  resume, settings updates and turns; Host injects no extra policy calls.
-- `Scripts/build-app.sh` produced a clean Release bundle. `Scripts/verify-app.py
-  dist/AnywhereHost.app --integration` verified valid signatures and Hardened
-  Runtime on all three executables, no App Sandbox/inheritance entitlements, no
-  provisioning profile, and all 63 checks against the packaged Rust helper.
-- Xcode Debug build with the project’s default manual ad-hoc signing also passed
-  all three executable signature/entitlement checks. Explicit signing flags keep
-  Hardened Runtime enabled for Xcode’s ad-hoc builds.
-- Real installed Codex read-only smoke, isolated shared-socket attachment and
-  loopback frpc/frps checks passed, including saved settings, token reuse, failed
-  authentication, port conflicts and custom CA verification.
-- This verifies build/signing/protocol behavior. Native UI acceptance, real-device
-  APNs delivery, Developer ID notarization and cross-Mac installation were not
-  performed in this change.
+```sh
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo build
+python3 Scripts/verify-host.py
+swift build
+swift test
+```
 
-## Earlier verification — 2026-10-28
+`verify-host.py` launches a disposable backend and deterministic Codex peer. It checks
+HTTPS/WSS authentication, certificate pinning, capability gates, ownership, native
+settings, history paging, approval correlation, events, compression, file boundaries
+and process locking. It does not mutate existing user threads.
 
-## Empty thread lifecycle regression
+Swift tests cover setup persistence, directory-state mapping, required paths,
+revocation, probe cancellation/timeouts, Host-only status requests and late-response handling.
 
-- Reproduced the reported thread using read-only live calls: metadata exists, Host owns it and `canMutate:true`, but `thread/turns/list` reports the precise pre-first-message error. Existing user threads were not mutated.
-- The compatibility adapter converts only that error on a first page into empty history. Rust unit tests cover incorrect IDs, cursor reads, different methods, unrelated failures and successful-page pass-through.
-- `cargo test --locked`: 8 tests passed; clippy with `-D warnings` passed; `Scripts/verify-host.py`: 34 HTTPS/WSS integration checks passed; `swift build` passed. The standalone `.app` was rebuilt and its signature verified. The already-running production Host has not been restarted; client compatibility with its original error response is retained.
-- `Scripts/smoke-real-codex.py --first-message` explicitly creates a new persistent test thread in a temporary workspace using the installed App runtime. Metadata/access/empty-history read, direct first-message submission, real streamed reply and paginated persisted history passed. Only the newly created test thread was archived afterward. This is distinct from the default read-only smoke and the existing ephemeral `--inference` option.
-- Real protocol checks exposed an additional client bug: `thread/resume` before the first message fails because no rollout exists yet. The native iOS client now starts that first turn without resume; changing model settings also avoids premature resume.
+## Packaged application
 
-Environment: this Apple Silicon Mac, Swift 6 / installed Xcode SDK, Rust 1.99.1, Codex App runtime `0.162.0-alpha.2`, frpc/frps `0.71.1`.
+```sh
+./Scripts/build-app.sh
+python3 Scripts/verify-app.py dist/AnywhereHost.app --integration
+python3 Scripts/verify-desktop.py --binary dist/AnywhereHost.app/Contents/MacOS/anywhere-host
+```
 
-| Check | Result |
-| --- | --- |
-| Rust unit tests | 6 passed: journal persistence/epoch, retention resync, structured approval validation, frpc serialization, diagnostic redaction, root traversal/symlink escape |
-| `cargo clippy --all-targets -- -D warnings` | Passed |
-| Real TLS HTTP/WSS fixture | 30 checks passed; launches the actual Rust service and a deterministic isolated Codex protocol peer |
-| Real installed App runtime | Initialize, 3 actual projects, thread list, paginated history, 8 model entries and project file listing passed |
-| Real inference | Ephemeral thread in a temporary directory streamed the requested marker and emitted matching completed turn; no tools requested, no existing user threads changed |
-| Real shared Unix socket | Separate isolated Codex daemon attached through native WebSocket; Host shutdown preserved the external daemon |
-| Real frpc/frps | Default TLS and explicit CA both forwarded pinned HTTPS through local frps; restart/config recovery, credential reuse, wrong-token failure, port conflict and start/status/stop passed |
-| Swift debug and release builds | Passed |
-| Single application packaging | `.app` includes SwiftUI executable, Rust executable, frpc, Info.plist and upstream license; `codesign --verify --deep --strict` passed with local ad-hoc signing |
-| Application launch | Packaged SwiftUI app started bundled backend; authenticated local status reported connected to App runtime |
+The bundle checks cover all four executable signatures, Hardened Runtime, absence
+of App Sandbox and the Apple Events entitlement/usage description. Desktop tests use
+an isolated local byte service for authentication, forwarding, limits and revocation;
+they do not enable system screen sharing or establish a real Mac login.
 
-`Scripts/verify-host.py` checks missing/incorrect bearer, browser-origin rejection, WebSocket authentication before upgrade, private token generation, exact TLS fingerprint, rejection without trust/pinning, real process request framing, desktop source filtering, foreign-thread protection, unsupported arbitrary command methods, cwd validation, ownership retention, rollout-path replacement rejection, turn start, pending approvals, malformed/duplicate approval handling, correlated completion, WSS replay, invalid epochs, rooted file reads, path/symlink escapes and single-instance locking.
+## Separate live checks
 
-`Scripts/smoke-real-codex.py` defaults to reads against the real installed environment. `--inference` explicitly opts into a small model call. `Scripts/verify-shared-codex.py` uses a disposable Codex Home and tests a shared daemon; it does not establish that the current desktop App exposes its private stdio transport. `Scripts/verify-frp.py` only listens on loopback and does not connect to a user or public frps server.
+```sh
+python3 Scripts/smoke-real-codex.py
+python3 Scripts/verify-shared-codex.py
+python3 Scripts/verify-frp.py
+```
 
-Not validated: a real iPhone Host v1 connection, WAN reachability from the phone, APNs/background behavior, current desktop App private-process attachment, every exposed advanced RPC, simultaneous independent desktop/Host writes, notarized distribution, Intel builds, multi-device races beyond single-use approval handling, full macOS accessibility/UI acceptance. A development view snapshot was inspected, but native macOS compositing was incomplete; it is not treated as UI acceptance evidence.
+The default Codex smoke is read-only. Shared-socket checks use an isolated daemon;
+frp checks use loopback servers. Neither proves attachment to the current desktop
+process or connectivity from another network.
 
-## Native iPhone client integration (2026-10-28)
+`smoke-real-codex.py --inference` explicitly opts into model use in an ephemeral
+thread. `--first-message` creates a new persistent test thread and archives it afterward.
+Neither belongs in the default read-only checks.
 
-The adjacent AnyWhereCoding client now connects with pinned Swift URLSession HTTPS/WSS and structured actions. A new additive `threadAccess` capability and `GET /v1/threads/{id}/access` endpoint expose the existing ownership/shared-process gate for its read-only/fork UI. Host integration coverage increased from 27 to 30 checks, including the advertised capability and foreign/owned thread state; Rust tests and clippy pass.
+## Acceptance boundaries
 
-Two disposable Rust Hosts with isolated fake Codex peers were exercised from the client transport (history, fork, turn, approval, completion; wrong pin/token rejected). The same Swift transport read the actual installed Codex runtime's 3 projects and 8 models without mutating existing threads. The macOS bundle was rebuilt and restarted while it had zero loaded threads and zero pending requests. iPhone Duo UI verification and detailed client limitations are tracked in the client repository's `Docs/HostClient.md`.
+Real-device WAN access, macOS consent dialogs/relaunch, full VoiceOver navigation,
+APNs delivery, production screen sharing, cross-Mac installation and notarization
+require separate validation. Screenshots and fixture checks do not establish these.
 
-The iOS HostSession integration test also passed against both disposable services, requiring a WSS-only token-usage event. Native Duo simulator interaction verified multiple computers/workspaces, read-only history and explicit fork, approvals, completion, status and file browsing. This is simulator evidence, not physical iPhone or WAN validation.
+## 2026-10-31 interface refresh
 
-## frps connection fix (2026-10-28)
+Xcode 27.1 / macOS 27 SDK: `swift build`, 7 Swift tests, 35 backend tests plus
+4 permission-probe tests, strict Clippy and 65 isolated HTTPS/WSS checks passed.
+Offline native windows were rendered for visual inspection; no existing user thread
+was changed. This is layout evidence, not live-service or full accessibility acceptance.
 
-The previous no-CA configuration emitted `transport.tls.useSystemCa`, which the bundled frpc 0.71.1 rejects before connecting. The existing local configuration also had the frps control port and desired proxy port confused. The renderer now uses upstream's standard TLS mode when no CA is supplied; an explicit CA continues to verify frps identity. End-to-end Host HTTPS pinning is unchanged. The UI separates control and proxy ports, restores saved settings without retrieving the token, and displays bounded diagnostics. Verification failures retain their actual error instead of a generic message.
+## 2026-10-31 工作区图片读取
 
-`Scripts/verify-frp.py` now covers the previously missing default-certificate server and no-CA client path, as well as explicit CA validation, persisted settings across a Host restart, scoped credential reuse, failed authentication, occupied public ports, private config/log permissions and redacted status. Server readiness is checked by its loopback listener rather than a fixed startup delay.
+新增经过同一 bearer 鉴权和 project/read 权威根目录校验的图片接口。`cargo test` 通过 36 项主程序测试和 4 项辅助测试；`cargo clippy --all-targets -- -D warnings`、`swift build` 通过。`Scripts/verify-host.py` 通过 72 项隔离 HTTPS/WSS 集成检查，新增图片字节一致性、无凭证拒绝、文本伪装图片拒绝、父目录与符号链接越界拒绝。未重启或替换用户运行中的 Host，使用该接口需要更新部署产物。
 
-After rebuilding and restarting the packaged app, a real connection to the user's supplied frps authenticated and registered the Host TCP proxy. This Mac reached the public HTTPS endpoint through frps: its leaf certificate exactly matched the local Host certificate; missing credentials returned HTTP 401; authenticated status returned HTTP 200 and a connected Codex App runtime. This is a real public-route check from the Mac, not a physical iPhone network test. No production thread was mutated.
+## 2026-10-31 Host-only Mac interface
 
-## 2026-10-29 interaction and paging update
+The Mac conversation/project UI and its RPC, event, history, model and approval
+state were removed. The dashboard reads only host-management endpoints; remote
+Codex RPCs remain available to clients. Swift build and 8 Swift tests passed,
+including management-only polling, offline-state clearing and stop/refresh races.
+Rust: 36 backend + 4 permission-probe tests, strict Clippy and 72 isolated HTTPS/WSS
+checks passed. Release packaging and all four executable signatures passed.
+Light/dark offline dashboard windows were visually checked; no real user thread
+was mutated by tests.
 
-Validated in a staged source copy: Swift package build; cargo test (24 passed); cargo clippy --all-targets -- -D warnings; verify-host.py (65 checks), including long single-turn item pagination and unchanged full-access settings forwarding. The Mac UI uses a single icon popover, per-command hold previews and stable observable rows, retains history during refresh, and stops reloading history on every completion. Mac real-runtime UI/performance profiling remains unverified; these checks use an isolated fake Codex peer.
+## Security v2 (2026-10-31)
 
-## App 内远程桌面（2026-10-31）
-
-`cargo test` 的后端 29 项与 permission-probe 4 项通过；`cargo clippy --all-targets -- -D warnings`、`swift build`、原有 `Scripts/verify-host.py` 的 65 项 HTTPS/WSS 回归通过。
-
-新增 `Scripts/verify-desktop.py` 使用隔离状态目录和本机 RFB 字节服务，通过 TLS 叶证书校验、认证/Origin 拒绝、默认关闭、服务可达性、两会话上限、512 KiB 二进制往返、ping/pong、开关撤销、连接名额释放及文本帧拒绝检查。远端不能指定代理目标或启用开关。
-
-客户端 WKWebView/noVNC 实际握手、像素绘制与键盘消息测试通过。以上不代表真实 Mac 屏幕共享登录、中文输入法或蜂窝网络已经验收。构建产物位于 `dist/AnywhereHost.app`，没有替换运行中的系统安装。
-
-Release 打包产物另经 `python3 Scripts/verify-desktop.py --binary dist/AnywhereHost.app/Contents/MacOS/anywhere-host` 验证，同样通过远程桌面协议检查。模拟器显示四色 fixture 画面，输入面板、快捷键菜单及关闭流程可操作；临时服务与配对凭证已清理。
+See [security architecture and verification](SECURITY-V2.md): 44 Rust tests, 8 Mac tests, 72 HTTPS/WSS integration checks, 40 attack checks, dual-Host Swift proof interoperability, and independent signed desktop relay/revocation passed. Client: 157 tests passed, 2 external-network cases skipped. Custom self-signed TLS 1.3 remains supported; v1 bearer authentication is removed. Physical-device Secure Enclave/background delivery remains pending.

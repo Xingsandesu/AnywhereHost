@@ -1,16 +1,16 @@
-# Architecture and delivery plan
+# Architecture
 
 ## Product architecture
 
-AnywhereHost is the self-hosted backend for the iPhone Duo client. The Host protocol provides native Codex operations, structured workspace resources, and live execution state to the iPhone app.
+AnywhereHost is a self-hosted backend for Host-compatible clients across devices. Its macOS app manages the host service; Codex interaction belongs to clients. The protocol exposes Codex operations, structured workspace resources, and live execution state.
 
 The macOS deliverable is one application bundle containing a SwiftUI executable, a Rust service, and pinned upstream frpc. The user's installed Codex provides the external runtime.
 
 ## Components
 
 ```text
-SwiftUI macOS console / iPhone Duo client
-       │ HTTPS JSON + WSS events, Bearer + certificate pin
+SwiftUI host management / Host v1 clients
+       │ HTTPS JSON + WSS events, device signatures + certificate pin
        ▼
 Rust Host: capability gate / request correlation / event journal
        ├── explicit project file and Git readers
@@ -40,25 +40,50 @@ Events are journaled in SQLite with a persistent epoch and monotonic sequence. S
 
 The application stops only its own backend, frpc and app-server children. An OS file lock prevents two backend processes from owning the same Host state directory. The Host service must remain running; this release has no launch-at-login service or crash supervisor.
 
-## Capability roadmap
+## macOS interface
 
-| Area | 0.1 status | Remaining work for desktop parity |
-| --- | --- | --- |
-| Project identity and roots | Native list/read/create/update/move RPC; Mac list/create UI | Project rename/delete semantics and migrations |
-| Threads and history | Native IDs, paginated history, start/resume/fork/archive/name RPC | Native iPhone sync/search implemented; pinning availability and conflict handling remain |
-| Turns | Start/steer/interrupt RPC, events, Mac send/stop UI | iPhone queued/steering UX, background restoration |
-| Context | Runtime settings, compaction, fork, goals/queues where supported | iPhone context/model/plan UI implemented; permissions profile selection, selected files and cross-device drafts remain |
-| Approval and input | Bidirectional RPC, single-use replies, native command/file approval + questions | Rich MCP forms, complete permission schema forms, concurrent-device audit UX |
-| Files and Git | Rooted list/text read, staged/unstaged diff API | iPhone file/Git reader implemented; editor, safe apply, conflict/merge UI remain |
-| Attachments | Native attachment RPC exposed when supported | Phone-to-host upload, size/type policy, preview and cleanup |
-| Desktop live process | Standard socket adapter implemented | Actual current desktop stdio session attachment; must use a supported shared endpoint |
-| Worktrees | Not implemented | Safe creation, branch selection, artifacts, cleanup and ownership |
-| Skills/plugins | Read/list RPC where available; inherited runtime config | Management UX, desktop-only injected plugin compatibility |
-| Remote connectivity | Bundled frpc, pinned Host HTTPS, connection QR, local frps tests and public-route check from Mac | Physical iPhone WAN validation, pairing codes, device revocation |
-| macOS packaging | Single native-architecture .app, local signing | Developer ID, notarization, universal binary, updater, login lifecycle |
-| iPhone Duo | Host v1 client, multi-computer/workspace SwiftUI, foreground Live Activity | APNs updates, uploads, worktrees, comprehensive parity and WAN validation |
+Design references: [Apple HIG materials](https://developer.apple.com/design/human-interface-guidelines/materials),
+[sidebars](https://developer.apple.com/design/human-interface-guidelines/sidebars), and
+[SwiftUI Liquid Glass](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views).
 
-A capability listed as an RPC is implemented as a gated native protocol operation; it is not a claim that every corresponding SwiftUI screen or every runtime version has been end-to-end validated.
+The macOS app is a single host dashboard with service status, device pairing,
+tunnel settings, remote desktop, permissions, logs and start/stop controls. Native
+toolbars and grouped settings adopt the current system appearance; primary actions
+use Liquid Glass on macOS 26+. The app polls only Host status, capabilities, tunnel
+and desktop endpoints. It has no project/thread browser, message composer, model
+picker, approval form, native RPC client or conversation event subscription.
+
+First launch offers Welcome → Permissions → Ready. Completion requires successful
+read/write checks of required directories and a connected Codex runtime. Skipping
+does not persist completion. Configured installations keep serving while setup is
+shown. Checks use an owned permission-probe subprocess with an eight-second timeout
+and cancellation. It enumerates at most one entry and creates, writes and removes
+one private temporary file; existing file contents are not modified.
+
+The permissions page exposes macOS settings and actual Host accessibility/screen
+recording preflight results. A successful directory check is not a Full Disk Access
+grant. Host checks do not establish permissions for a shared Codex process or external
+tool. Required directories are rechecked at startup after setup completion. Checks cover
+Host data, the actual Codex Home and an explicitly selected directory; the Mac app
+does not enumerate Codex projects.
+
+## Implemented surface and limits
+
+- Native RPC: projects, threads, history, turns, settings, approvals and catalogs,
+  gated by installed runtime support. See the allowlist in `Docs/API.md`.
+- Mac UI: host service status and lifecycle, pairing, tunnel settings, remote desktop,
+  permission checks and logs. Codex conversation and approval UI belong to clients.
+- Resource APIs: rooted file listing/text, Git diff, events, tunnels, APNs registration
+  and desktop proxy. An API does not imply an equivalent Mac editor or management UI.
+- Pending: worktree management, file editing, rich MCP forms,
+  desktop private-process attachment, notarization and automatic updates.
+
+Client interfaces and platform-specific features are documented in their own
+repositories; Host support does not establish complete desktop parity.
+
+## Security
+
+[Security v2](SECURITY-V2.md) implements single-use QR enrollment, Secure Enclave device proofs, separate management authority, TLS 1.3, revocation and bounded ingress. Custom/self-signed certificates remain supported by exact leaf pinning.
 
 ## Sources
 

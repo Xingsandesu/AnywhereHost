@@ -1,12 +1,15 @@
+from security_wire import admin_headers
 import base64, hashlib, json, os, socket, ssl, struct
 
 class WebSocket:
-    def __init__(self, port, token, certificate, query=''):
+    def __init__(self, port, token, certificate, query='', proof=None):
         self.socket = ssl._create_unverified_context().wrap_socket(socket.create_connection(('127.0.0.1', port)), server_hostname='localhost')
         self.socket.settimeout(5)
         assert self.socket.getpeercert(binary_form=True) == certificate
         key = base64.b64encode(os.urandom(16)).decode()
-        request = f'GET /v1/events{query} HTTP/1.1\r\nHost: localhost:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer {token}\r\n\r\n'
+        auth = proof or admin_headers(port,token,certificate,'GET','/v1/events'+query)
+        encoded = ''.join(f'{k}: {v}\r\n' for k,v in auth.items())
+        request = f'GET /v1/events{query} HTTP/1.1\r\nHost: localhost:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n{encoded}\r\n'
         self.socket.sendall(request.encode())
         header = b''
         while not header.endswith(b'\r\n\r\n'): header += self.socket.recv(1)

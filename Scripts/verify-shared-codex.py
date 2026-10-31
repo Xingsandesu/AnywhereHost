@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from security_wire import admin_headers
 """Verify shared-socket attachment without touching the user's Codex Home or running inference."""
 import http.client,json,os,pathlib,socket,ssl,subprocess,tempfile,time
 ROOT=pathlib.Path(__file__).resolve().parents[1]
@@ -19,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix='ah-shared-',dir='/tmp') as temporary:
         def call(path,body=None):
             c=http.client.HTTPSConnection('127.0.0.1',port,context=ssl._create_unverified_context(),timeout=5);c.connect()
             assert c.sock.getpeercert(binary_form=True)==ssl.PEM_cert_to_DER_cert((state/'host-cert.pem').read_text())
-            c.request('GET' if body is None else 'POST',path,None if body is None else json.dumps(body),{'Authorization':'Bearer '+(state/'access-token').read_text(),'Content-Type':'application/json'})
+            c.request('GET' if body is None else 'POST',path,None if body is None else json.dumps(body),{**admin_headers(port,(state/'admin-key-v2').read_text(),ssl.PEM_cert_to_DER_cert((state/'host-cert.pem').read_text()),'GET' if body is None else 'POST',path,None if body is None else json.dumps(body)),'Content-Type':'application/json'})
             r=c.getresponse();value=json.loads(r.read());c.close();assert r.status==200,value;return value
         for _ in range(100):
             try:
