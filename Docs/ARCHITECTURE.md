@@ -9,7 +9,7 @@ The macOS deliverable is one application bundle containing a SwiftUI executable,
 ## Components
 
 ```text
-SwiftUI host management / Host v1 clients
+SwiftUI host management / Host security v2 clients
        │ HTTPS JSON + WSS events, device signatures + certificate pin
        ▼
 Rust Host: capability gate / request correlation / event journal

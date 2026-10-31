@@ -43,7 +43,7 @@ TestFlight、App Store、Ad Hoc 使用 `production`；开发签名设备使用 `
 - 手机使用已有 HTTPS 证书固定验证和 bearer 鉴权。后台上传使用独立、短时 URLSession，不依赖前台 WebSocket，不使用永久后台运行。Keychain 凭证迁移至 AfterFirstUnlockThisDeviceOnly，支持锁屏时的令牌更新。
 - `POST /v1/live-activities` 注册字段：`activityId`、十六进制 `pushToken`、`environment`（sandbox/production）、`threadId`、`turnId`、Unix 秒 `startedAt`、设备按活动持久化递增的 `tokenVersion`。必须对应 Host 观察到的原生任务；不接受客户端任意推送内容。
 - `POST /v1/live-activities/remove` 接收 `activityId`、`pushToken`。删除只匹配当前令牌，短期 tombstone 防止晚到的注册请求恢复已取消活动。
-- `GET /v1/live-activities/status` 返回已加载环境、订阅数、Apple 最近接受请求时间及脱敏错误；不返回 token、JWT 或私钥。仍需 Host bearer 鉴权。
+- `GET /v1/live-activities/status` 返回已加载环境、订阅数、Apple 最近接受请求时间及脱敏错误；不返回 token、JWT 或私钥。需 Host v2 请求签名鉴权。
 - `GET /v1/capabilities` 的 `liveActivityPush` 包含 `enabled`、`environments`。
 
 ## 投递与一致性

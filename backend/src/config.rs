@@ -122,5 +122,29 @@ pub fn prepare(dir: &Path) -> Result<(Config, String, String)> {
         .output()?;
     ensure!(output.status.success(), "invalid TLS certificate");
     let fingerprint = hex::encode(Sha256::digest(&output.stdout));
+    // The v2 management key is independent; never retain the obsolete bearer secret.
+    match fs::remove_file(dir.join("access-token")) {
+        Ok(()) => {},
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Err(error) => return Err(error).context("cannot remove obsolete access-token"),
+    }
     Ok((config, token, fingerprint))
+}
+
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn removes_legacy_secret_without_rotating_v2_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let old = directory.path().join("access-token");
+        std::fs::write(&old, "obsolete-secret").unwrap();
+        let (_, key, fingerprint) = super::prepare(directory.path()).unwrap();
+        assert!(!old.exists());
+        std::fs::write(&old, "restored-obsolete-secret").unwrap();
+        let (_, next_key, next_fingerprint) = super::prepare(directory.path()).unwrap();
+        assert!(!old.exists());
+        assert_eq!(key, next_key);
+        assert_eq!(fingerprint, next_fingerprint);
+    }
 }
