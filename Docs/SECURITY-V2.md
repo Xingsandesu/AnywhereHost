@@ -90,3 +90,28 @@ This protects the network trust boundary; it is not a claim of invulnerability, 
 - [OWASP WebSocket Security](https://cheatsheetseries.owasp.org/cheatsheets/WebSocket_Security_Cheat_Sheet.html): Origin checks, revocation, message limits and resource boundaries.
 - [Apple Secure Enclave](https://developer.apple.com/documentation/security/protecting-keys-with-the-secure-enclave) and [CryptoKit key access defaults](https://developer.apple.com/documentation/cryptokit/secureenclave/p256/signing/privatekey/init(compactrepresentable:accesscontrol:authenticationcontext:)): device-bound P-256 signing without added user prompts.
 - [Rustls AWS-LC provider](https://docs.rs/rustls/latest/rustls/crypto/aws_lc_rs/index.html): supported TLS algorithms and key exchange groups.
+
+
+## Local deployment — 2026-10-31 21:22 CST
+
+Installed the Release bundle built from `2385ebd032bb0c4f427d6b3176f79d14958aae90`
+at `/Applications/AnywhereHost.app`. All four installed executable hashes match
+the verified packaged application. The prior app and complete Host state were
+backed up under `~/Library/Developer/Xcode/Archives/2026-10-31/` as
+`AnywhereHost-before-security-v2.app` and `AnywhereHost-before-security-v2-state`.
+Existing configuration, certificate and APNs identity hashes remain unchanged.
+
+The new service reports security protocol 2 and a connected `appRuntime` using
+the existing Codex Home. Restarted the existing frpc tunnel with its saved settings;
+a certificate-pinned TLS 1.3 signed status request through the public endpoint
+succeeded. Legacy Bearer authentication returned HTTP 401. Remote desktop remains
+enabled and loopback screen sharing is reachable. APNs sandbox/production remain
+enabled, with no failed subscriptions reported. This does not establish physical
+phone delivery or UI behavior.
+
+Release checks: 44 Rust tests, strict Clippy, Swift build and 8 Swift tests passed;
+72 integration checks passed against both the development and packaged backends;
+40 security checks passed. The production Swift transport passed pairing and signed
+HTTPS/WSS against two disposable packaged Hosts. Existing user conversations were
+not mutated. Install receipt and logs are archived alongside the client 1.0 (24)
+release artifacts. Clients must update and scan a new protocol-v2 QR code.
