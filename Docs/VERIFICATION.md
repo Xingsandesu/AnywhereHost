@@ -91,3 +91,10 @@ See [security architecture and verification](SECURITY-V2.md): 44 Rust tests, 8 M
 - Gitleaks scanned full Git history (21 pre-release commits) and the working directory with no findings.
 
 Real phone drag/disconnect diagnosis is still pending user reproduction; the above is not a claim of end-to-end resolution.
+
+Public release verification: `v0.1.4` is published in `Xingsandesu/AnywhereHost`.
+Anonymous HTTPS downloads match SHA256SUMS and pass independent Ed25519 verification;
+an altered ZIP is rejected. The installed app's Check for Updates reads the public
+feed and reports 0.1.4 as current. The exact final release bundle is installed and
+its saved tunnel restores to running after restart. Actual upgrade replacement
+from a future lower Sparkle build is not yet exercised (0.1.3 had no updater).
