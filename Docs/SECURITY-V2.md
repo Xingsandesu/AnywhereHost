@@ -115,3 +115,25 @@ Release checks: 44 Rust tests, strict Clippy, Swift build and 8 Swift tests pass
 HTTPS/WSS against two disposable packaged Hosts. Existing user conversations were
 not mutated. Install receipt and logs are archived alongside the client 1.0 (24)
 release artifacts. Clients must update and scan a new protocol-v2 QR code.
+
+
+## Removal of obsolete v1 state — 2026-10-31
+
+The installed Host now removes `access-token` during startup; a regression test
+verifies that this does not rotate the v2 management key or TLS identity. Existing
+v2 pairing, tunnel and APNs configuration remain intact. The former app/state
+backups mentioned above have been intentionally deleted at the user's request.
+The Host event journal and old Live Activity records were reset and vacuumed;
+all 43 owned-thread IDs and the original Codex conversation store were preserved.
+Public pinned TLS 1.3 signed status and desktop reachability passed after restart.
+
+Old local archives, temporary fixtures and build caches were removed. Client
+TestFlight builds 1–23 and the two available legacy Host TestFlight builds were
+expired. Apple retains build records; expiration prevents further beta use and
+is not deletion of Apple's records. Git history was explicitly retained.
+
+The obsolete macOS sandbox container at
+`~/Library/Containers/com.jintongshu.AnywhereHost/Data` could not be inspected or
+removed: macOS returned `Operation not permitted`. SandboxProbe and
+SandboxVerification data were removed, but OS-managed container metadata remains.
+These limits prevent a claim that every historical byte has been erased.
