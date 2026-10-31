@@ -52,7 +52,7 @@ TestFlight、App Store、Ad Hoc 使用 `production`；开发签名设备使用 `
 
 Host 使用 ES256 fixed-width `r || s` JWT，50 分钟内复用同一签名令牌，环境各自复用 HTTP/2 连接。TLS 使用 macOS `/etc/ssl/cert.pem` 公共 CA，并验证 Apple 主机名；不沿用配对 Host 的自签名策略。
 
-普通进展合并为最多约每 15 秒一次，安静任务通过主机快照与约 60 秒心跳更新。审批和终态优先发，普通更新 priority 5，审批/终态 priority 10。`aps.timestamp` 按活动单调递增；`stale-date` 根据最后确认的任务状态计算，无法继续验证时不会把陈旧信息伪装成实时状态。终态发送 `event: end`，90 秒后从锁屏移除。
+首次投递和阶段变化使用 priority 10；思考、执行、回复等普通阶段变化按 5 秒窗口合并，审批、审批解除和终态跳过普通限速。仅完成数量等同阶段进展仍最多约每 15 秒一次，安静任务通过主机快照与约 60 秒心跳更新，这些更新使用 priority 5。持久化记录 Apple 已接受的阶段，升级保留已有订阅；发送途中发生的阶段变化也会重新安排，网络/429 等错误退避仍然有效。iOS 声明 `NSSupportsLiveActivitiesFrequentUpdates`，实际频繁更新权限与投递预算由系统和用户设置控制。`aps.timestamp` 按活动单调递增；`stale-date` 根据最后确认的任务状态计算，无法继续验证时不会把陈旧信息伪装成实时状态。终态发送 `event: end`，90 秒后从锁屏移除。
 
 外层 APNs `timestamp`、`stale-date`、`dismissal-date` 使用 Unix 秒；`content-state` 中 Swift `Date` 使用默认 Codable 的 2001 年参考时间（Unix 秒减 978307200）。内容键名与 `AgentActivityAttributes.ContentState` 一致。
 
@@ -80,3 +80,5 @@ production/sandbox 两把关联 APNs Key 已保存到桌面并通过 P-256 签�
 上线前须完成：能力开通/签名验证 → 全部编译测试 → 安装新 Host 与 iOS App → 开始真实任务 → 锁屏观察阶段/审批/结束 → Host 重启恢复 → TestFlight production 环境复验。不要以单个 HTTP 200 代替设备显示验收。
 
 依据：[Apple ActivityKit Push](https://developer.apple.com/documentation/activitykit/starting-and-updating-live-activities-with-activitykit-push-notifications)、[Token-based APNs](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns)、[APNs HTTP requests](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)。
+
+2026-10-31 调度修复验证：Rust 39 项测试、严格 Clippy、Rust/Swift 构建及 65 项隔离 HTTPS/WSS 集成检查通过。新增覆盖阶段切换限速与优先级、发送途中的审批解除及普通阶段变化、同阶段心跳、失败退避和原订阅数据库迁移。只读检查当前运行的 Host 已启用 sandbox/production，最近保留的完成状态已获 Apple 接受且无失败订阅。18:22（北京时间）已将通过打包验证的新版安装到 `/Applications/AnywhereHost.app` 并重启；Codex 连接正常，sandbox/production APNs 启用，配对令牌、证书及配置哈希保持一致。旧版备份与安装回执位于 `~/Library/Developer/Xcode/Archives/2026-10-31/`。配套 iOS 1.0 (20) 已上传并完成 Apple 处理（VALID），进入现有内部测试组，简体中文测试说明已保存验证；真实设备锁屏显示仍待验收。

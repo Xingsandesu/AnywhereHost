@@ -9,6 +9,7 @@ use std::{collections::{HashMap, HashSet}, sync::{Arc, atomic::Ordering}, time::
 
 const APPLE_EPOCH: f64 = 978_307_200.0;
 const LIFETIME: i64 = 8 * 60 * 60;
+const PHASE_INTERVAL: i64 = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +92,13 @@ pub fn initialize(db: &Connection) -> Result<()> {
         last_timestamp INTEGER NOT NULL DEFAULT 0, last_error TEXT);
         CREATE TABLE IF NOT EXISTS activity_retired (id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS activity_subscription_turn ON activity_subscriptions(thread,turn);")?;
+    // Preserve existing subscriptions when upgrading the durable outbox.
+    let has_delivered_phase = db.prepare("PRAGMA table_info(activity_subscriptions)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?.iter().any(|name| name == "delivered_phase");
+    if !has_delivered_phase {
+        db.execute("ALTER TABLE activity_subscriptions ADD COLUMN delivered_phase TEXT", [])?;
+    }
     Ok(())
 }
 fn read_turn(db: &Connection, thread: &str, turn: &str) -> Result<Option<(Turn, i64)>> {
@@ -103,9 +111,12 @@ fn save_turn(db: &Connection, thread: &str, turn: &str, value: &mut Turn, sequen
     db.execute("INSERT INTO activity_turns(thread,turn,data,sequence,updated) VALUES(?1,?2,?3,?4,?5)
         ON CONFLICT(thread,turn) DO UPDATE SET data=excluded.data,sequence=excluded.sequence,updated=excluded.updated,version=version+1",
         params![thread, turn, serde_json::to_string(value)?, sequence, now])?;
-    if value.state.urgent() {
-        db.execute("UPDATE activity_subscriptions SET next_attempt=MIN(next_attempt,?3) WHERE thread=?1 AND turn=?2 AND attempts=0", params![thread, turn, now])?;
-    }
+    // Phase changes should not sit behind the ordinary progress/heartbeat
+    // throttle. Preserve APNs error backoff; coalesce rapid work-phase changes.
+    db.execute("UPDATE activity_subscriptions SET next_attempt=MIN(next_attempt,
+        CASE WHEN ?4 OR delivered_phase='approval' THEN ?3 ELSE MAX(?3,last_sent+?6) END)
+        WHERE thread=?1 AND turn=?2 AND attempts=0 AND (?4 OR delivered_phase IS NOT ?5)",
+        params![thread, turn, now, value.state.urgent(), value.state.phase, PHASE_INTERVAL])?;
     Ok(())
 }
 fn native_time(value: &Value) -> Option<f64> { value.as_f64().filter(|n| n.is_finite() && *n >= 0.0 && *n <= apns::now() as f64 + 60.0) }
@@ -151,7 +162,7 @@ pub fn record_event(db: &Connection, event: &Value, sequence: i64, now: i64) -> 
         db.query_row("SELECT turn FROM activity_turns WHERE thread=?1 ORDER BY sequence DESC LIMIT 1", [thread], |r| r.get(0)).optional()?
     } else { turn };
     let Some(turn) = turn else { return Ok(()) };
-    if !pending && !matches!(method, "turn/started" | "turn/completed" | "item/started" | "item/completed" | "item/agentMessage/delta" | "item/reasoning/summaryTextDelta" | "item/commandExecution/outputDelta") { return Ok(()) }
+    if !pending && !matches!(method, "turn/started" | "turn/completed" | "item/started" | "item/completed" | "item/agentMessage/delta" | "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" | "item/commandExecution/outputDelta") { return Ok(()) }
     let existing = read_turn(db, thread, &turn)?;
     if existing.as_ref().is_some_and(|(v,_)| v.state.terminal()) { return Ok(()) }
     let mut value = existing.as_ref().map(|(v,_)| v.clone()).unwrap_or_else(|| Turn::new(native_time(&p["turn"]["startedAt"]).unwrap_or(now as f64), now));
@@ -164,7 +175,7 @@ pub fn record_event(db: &Connection, event: &Value, sequence: i64, now: i64) -> 
     } else {
         let kind = p["item"]["type"].as_str().unwrap_or("");
         value.work_phase = if kind == "agentMessage" || method == "item/agentMessage/delta" { "responding" }
-            else if kind == "reasoning" || method == "item/reasoning/summaryTextDelta" { "thinking" } else { "working" }.into();
+            else if kind == "reasoning" || matches!(method, "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta") { "thinking" } else { "working" }.into();
         if method == "item/completed" && kind == "commandExecution" && p["item"]["status"] == "completed"
             && let Some(id) = p["item"]["id"].as_str() { value.tools.insert(id.into()); }
     }
@@ -260,16 +271,17 @@ impl Events {
         db.execute("DELETE FROM activity_subscriptions WHERE expires<=?1", [now])?;
         db.execute("DELETE FROM activity_retired WHERE expires<=?1", [now])?;
         db.execute("DELETE FROM activity_turns WHERE updated<?1 AND NOT EXISTS(SELECT 1 FROM activity_subscriptions s WHERE s.thread=activity_turns.thread AND s.turn=activity_turns.turn)", [now-LIFETIME])?;
-        let rows = db.prepare("SELECT s.id,s.token,s.environment,t.data,t.version,s.attempts,s.last_timestamp,s.expires,s.delivered FROM activity_subscriptions s JOIN activity_turns t ON s.thread=t.thread AND s.turn=t.turn
+        let rows = db.prepare("SELECT s.id,s.token,s.environment,t.data,t.version,s.attempts,s.last_timestamp,s.expires,s.delivered,s.delivered_phase FROM activity_subscriptions s JOIN activity_turns t ON s.thread=t.thread AND s.turn=t.turn
             WHERE s.next_attempt<=?1 AND (s.delivered!=t.version OR (s.last_sent<=?2 AND json_extract(t.data,'$.state.phase') NOT IN ('completed','stopped','failed')))
             ORDER BY CASE WHEN json_extract(t.data,'$.state.phase') IN ('approval','completed','stopped','failed') THEN 0 ELSE 1 END,s.last_sent LIMIT 32")?
-            .query_map(params![now,now-60], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?,r.get::<_,u32>(5)?,r.get::<_,i64>(6)?,r.get::<_,i64>(7)?,r.get::<_,i64>(8)?)))?
+            .query_map(params![now,now-60], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?,r.get::<_,u32>(5)?,r.get::<_,i64>(6)?,r.get::<_,i64>(7)?,r.get::<_,i64>(8)?,r.get::<_,Option<String>>(9)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows.into_iter().map(|(id,token,environment,data,version,attempts,last_timestamp,expires,delivered)| {
+        rows.into_iter().map(|(id,token,environment,data,version,attempts,last_timestamp,expires,delivered,delivered_phase)| {
             let turn: Turn = serde_json::from_str(&data)?;
             let timestamp = now.max(last_timestamp+1);
             db.execute("UPDATE activity_subscriptions SET last_timestamp=?2 WHERE id=?1", params![id,timestamp])?;
-            let urgent = delivered != version && turn.state.urgent();
+            let urgent = delivered_phase.as_deref() != Some(turn.state.phase.as_str())
+                || (delivered != version && turn.state.terminal());
             Ok(Job { id, token, environment:serde_json::from_value(json!(environment))?, state:turn.state, version, attempts, timestamp, expires, urgent })
         }).collect()
     }
@@ -277,9 +289,13 @@ impl Events {
         let db = self.db.lock().unwrap();
         let now = apns::now();
         match result {
-            Delivery::Accepted => { db.execute("UPDATE activity_subscriptions SET delivered=?3,last_sent=?4,
-                next_attempt=CASE WHEN EXISTS(SELECT 1 FROM activity_turns t WHERE t.thread=activity_subscriptions.thread AND t.turn=activity_subscriptions.turn AND t.version>?3 AND json_extract(t.data,'$.state.phase') IN ('approval','completed','stopped','failed')) THEN ?4 ELSE ?4+15 END,
-                attempts=0,last_error=NULL WHERE id=?1 AND token=?2", params![job.id,job.token,job.version,now])?; }
+            Delivery::Accepted => { db.execute("UPDATE activity_subscriptions SET delivered=?3,last_sent=?4,delivered_phase=?5,
+                next_attempt=CASE
+                    WHEN EXISTS(SELECT 1 FROM activity_turns t WHERE t.thread=activity_subscriptions.thread AND t.turn=activity_subscriptions.turn AND t.version>?3 AND
+                        (json_extract(t.data,'$.state.phase') IN ('approval','completed','stopped','failed') OR (?5='approval' AND json_extract(t.data,'$.state.phase')!=?5))) THEN ?4
+                    WHEN EXISTS(SELECT 1 FROM activity_turns t WHERE t.thread=activity_subscriptions.thread AND t.turn=activity_subscriptions.turn AND t.version>?3 AND json_extract(t.data,'$.state.phase')!=?5) THEN ?4+?6
+                    ELSE ?4+15 END,
+                attempts=0,last_error=NULL WHERE id=?1 AND token=?2", params![job.id,job.token,job.version,now,job.state.phase,PHASE_INTERVAL])?; }
             Delivery::InvalidToken => { db.execute("DELETE FROM activity_subscriptions WHERE id=?1 AND token=?2", params![job.id,job.token])?; }
             Delivery::Retry { reason, delay } => {
                 let backoff = delay.max((5_i64 * 2_i64.pow(job.attempts.min(6))).min(300));
@@ -472,4 +488,93 @@ mod tests {
         event(&events,"turn/completed",json!({"threadId":"t","turn":{"id":"r","status":"completed"}}));
         assert!(events.activity_jobs().unwrap().is_empty());
     }
+    #[test] fn phase_changes_bypass_progress_throttle_and_use_high_priority() {
+        let events=Events::open(Path::new(":memory:")).unwrap(); running(&events);
+        events.register_activity(&registration("a",1)).unwrap();
+        let first=events.activity_jobs().unwrap().remove(0);
+        assert!(first.urgent);
+        events.finish_activity_job(&first,Delivery::Accepted).unwrap();
+        // A phase change after five seconds must not wait the remaining ten.
+        events.db.lock().unwrap().execute("UPDATE activity_subscriptions SET last_sent=?1",[apns::now()-PHASE_INTERVAL]).unwrap();
+        event(&events,"item/reasoning/textDelta",json!({"threadId":"t","turnId":"r","delta":"private content"}));
+        let thinking=events.activity_jobs().unwrap().remove(0);
+        assert_eq!(thinking.state.phase,"thinking"); assert!(thinking.urgent);
+        assert!(!thinking.payload().to_string().contains("private content"));
+        events.finish_activity_job(&thinking,Delivery::Accepted).unwrap();
+        // Rapid transitions are coalesced to avoid spending the push budget on every token.
+        event(&events,"item/agentMessage/delta",json!({"threadId":"t","turnId":"r","delta":"answer"}));
+        assert!(events.activity_jobs().unwrap().is_empty());
+        events.db.lock().unwrap().execute("UPDATE activity_subscriptions SET next_attempt=0",[]).unwrap();
+        let responding=events.activity_jobs().unwrap().remove(0);
+        assert!(responding.urgent); assert_eq!(responding.state.phase,"responding");
+        events.finish_activity_job(&responding,Delivery::Accepted).unwrap();
+        // A verified heartbeat in the same phase remains low priority.
+        events.db.lock().unwrap().execute("UPDATE activity_subscriptions SET next_attempt=0,last_sent=?1",[apns::now()-60]).unwrap();
+        assert!(!events.activity_jobs().unwrap().remove(0).urgent);
+    }
+    #[test] fn approval_resolution_is_immediate_even_during_inflight_delivery() {
+        let events=Events::open(Path::new(":memory:")).unwrap(); running(&events);
+        events.register_activity(&registration("a",1)).unwrap();
+        event(&events,"host/request/pending",json!({"requestId":"approval","request":{"id":42,"params":{"threadId":"t","turnId":"r"}}}));
+        let approval=events.activity_jobs().unwrap().remove(0);
+        event(&events,"host/request/resolved",json!({"requestId":"approval"}));
+        events.finish_activity_job(&approval,Delivery::Accepted).unwrap();
+        let resumed=events.activity_jobs().unwrap().remove(0);
+        assert_eq!(resumed.state.phase,"working"); assert!(resumed.urgent);
+        events.finish_activity_job(&resumed,Delivery::Accepted).unwrap();
+        event(&events,"host/request/pending",json!({"requestId":"again","request":{"id":43,"params":{"threadId":"t","turnId":"r"}}}));
+        let approval=events.activity_jobs().unwrap().remove(0);
+        assert!(approval.urgent);
+        events.finish_activity_job(&approval,Delivery::Accepted).unwrap();
+        event(&events,"host/request/resolved",json!({"requestId":"again"}));
+        assert_eq!(events.activity_jobs().unwrap().remove(0).state.phase,"working");
+    }
+    #[test] fn phase_changes_preserve_failed_delivery_backoff() {
+        let events=Events::open(Path::new(":memory:")).unwrap(); running(&events);
+        events.register_activity(&registration("a",1)).unwrap();
+        let job=events.activity_jobs().unwrap().remove(0);
+        events.finish_activity_job(&job,Delivery::Retry{reason:"TooManyRequests".into(),delay:60}).unwrap();
+        event(&events,"item/agentMessage/delta",json!({"threadId":"t","turnId":"r"}));
+        assert!(events.activity_jobs().unwrap().is_empty());
+    }
+    #[test] fn upgrading_outbox_preserves_existing_subscriptions() {
+        let events=Events::open(Path::new(":memory:")).unwrap(); running(&events);
+        events.register_activity(&registration("a",1)).unwrap();
+        let db=events.db.lock().unwrap();
+        db.execute("ALTER TABLE activity_subscriptions DROP COLUMN delivered_phase",[]).unwrap();
+        initialize(&db).unwrap(); initialize(&db).unwrap();
+        let count:i64=db.query_row("SELECT count(*) FROM activity_subscriptions",[],|r|r.get(0)).unwrap();
+        assert_eq!(count,1);
+        drop(db);
+        assert!(events.activity_jobs().unwrap().remove(0).urgent);
+    }
+
+    #[test] fn inflight_phase_change_is_scheduled_before_ordinary_progress() {
+        let events=Events::open(Path::new(":memory:")).unwrap(); running(&events);
+        events.register_activity(&registration("a",1)).unwrap();
+        let job=events.activity_jobs().unwrap().remove(0);
+        event(&events,"item/agentMessage/delta",json!({"threadId":"t","turnId":"r"}));
+        events.finish_activity_job(&job,Delivery::Accepted).unwrap();
+        let delay:i64=events.db.lock().unwrap().query_row("SELECT next_attempt-last_sent FROM activity_subscriptions",[],|r|r.get(0)).unwrap();
+        assert_eq!(delay,PHASE_INTERVAL);
+    }
+    #[test] fn same_phase_progress_and_approval_heartbeats_stay_low_priority() {
+        let events=Events::open(Path::new(":memory:")).unwrap(); running(&events);
+        events.register_activity(&registration("a",1)).unwrap();
+        let job=events.activity_jobs().unwrap().remove(0);
+        events.finish_activity_job(&job,Delivery::Accepted).unwrap();
+        event(&events,"item/completed",json!({"threadId":"t","turnId":"r","item":{"id":"tool","type":"commandExecution","status":"completed"}}));
+        let delay:i64=events.db.lock().unwrap().query_row("SELECT next_attempt-last_sent FROM activity_subscriptions",[],|r|r.get(0)).unwrap();
+        assert_eq!(delay,15);
+        assert!(events.activity_jobs().unwrap().is_empty());
+        events.db.lock().unwrap().execute("UPDATE activity_subscriptions SET next_attempt=0",[]).unwrap();
+        assert!(!events.activity_jobs().unwrap().remove(0).urgent);
+        event(&events,"host/request/pending",json!({"requestId":"approval","request":{"id":42,"params":{"threadId":"t","turnId":"r"}}}));
+        let approval=events.activity_jobs().unwrap().remove(0);
+        events.finish_activity_job(&approval,Delivery::Accepted).unwrap();
+        let requests=json!([{"requestId":"approval","request":{"id":42,"params":{"threadId":"t","turnId":"r"}}}]);
+        events.observe_activity_snapshot("t",&json!({"data":[{"id":"r","status":"inProgress","items":[]}]}),&requests,events.last_sequence()).unwrap();
+        assert!(!events.activity_jobs().unwrap().remove(0).urgent);
+    }
+
 }
