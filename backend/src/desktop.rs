@@ -51,14 +51,19 @@ impl Desktop {
         let target = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 5900));
         #[cfg(test)]
         let target = self.target.unwrap_or(target);
-        tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(target)).await?
+        let stream =
+            tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(target)).await??;
+        stream.set_nodelay(true)?;
+        Ok(stream)
     }
 }
 pub async fn status(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let enabled = s.desktop.enabled().await;
-    let reachable = enabled && s.desktop.connect().await.is_ok();
+    // Do not create short-lived RFB viewers during an active session.
+    let active = 2 - s.desktop.slots.available_permits();
+    let reachable = enabled && (active > 0 || s.desktop.connect().await.is_ok());
     Json(
-        json!({"supported":true,"enabled":enabled,"reachable":reachable,"protocol":"rfb","engine":"noVNC","activeSessions":2-s.desktop.slots.available_permits()}),
+        json!({"supported":true,"enabled":enabled,"reachable":reachable,"protocol":"rfb","engine":"noVNC","activeSessions":active}),
     )
 }
 pub async fn socket(
@@ -101,54 +106,76 @@ async fn relay(
     state: Arc<AppState>,
     principal: crate::security::Principal,
 ) {
+    let session = uuid::Uuid::new_v4();
+    let started = std::time::Instant::now();
     let (mut output, mut input) = ws.split();
     let (mut reader, mut writer) = tcp.into_split();
+    let mut uploaded = 0u64;
+    let mut downloaded = 0u64;
+    // Keep these futures alive across polls: cancelling a partially completed
+    // write and then retrying can duplicate bytes in the RFB stream.
     let upload = async {
-        while let Ok(Some(Ok(message))) =
-            tokio::time::timeout(Duration::from_secs(90), input.next()).await
-        {
+        loop {
+            let message = match tokio::time::timeout(Duration::from_secs(90), input.next()).await {
+                Err(_) => return "client_idle_timeout",
+                Ok(None) => return "client_eof",
+                Ok(Some(Err(_))) => return "client_read_error",
+                Ok(Some(Ok(message))) => message,
+            };
             match message {
                 Message::Binary(data) => {
-                    if !matches!(
-                        tokio::time::timeout(Duration::from_secs(15), writer.write_all(&data))
-                            .await,
-                        Ok(Ok(()))
-                    ) {
-                        break;
+                    match tokio::time::timeout(Duration::from_secs(30), writer.write_all(&data))
+                        .await
+                    {
+                        Err(_) => return "screen_write_timeout",
+                        Ok(Err(_)) => return "screen_write_error",
+                        Ok(Ok(())) => uploaded += data.len() as u64,
                     }
                 }
                 Message::Ping(_) | Message::Pong(_) => {}
-                _ => break,
+                Message::Close(_) => return "client_close",
+                _ => return "invalid_client_frame",
             }
         }
     };
     let download = async {
-        let mut buffer = vec![0u8; 64 * 1024];
-        while let Ok(n) = reader.read(&mut buffer).await {
-            if n == 0 {
-                break;
-            }
-            if !matches!(
-                tokio::time::timeout(
-                    Duration::from_secs(15),
-                    output.send(Message::Binary(buffer[..n].to_vec().into()))
-                )
-                .await,
-                Ok(Ok(()))
-            ) {
-                break;
+        let mut buffer = vec![0u8; 16 * 1024];
+        loop {
+            let n = match reader.read(&mut buffer).await {
+                Ok(0) => return "screen_eof",
+                Ok(n) => n,
+                Err(_) => return "screen_read_error",
+            };
+            match tokio::time::timeout(
+                Duration::from_secs(30),
+                output.send(Message::Binary(buffer[..n].to_vec().into())),
+            )
+            .await
+            {
+                Err(_) => return "client_write_timeout",
+                Ok(Err(_)) => return "client_write_error",
+                Ok(Ok(())) => downloaded += n as u64,
             }
         }
     };
     let revoked = async {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            if !state.security.active(&principal) || !state.desktop.enabled().await {
-                break;
+            if !state.security.active(&principal) {
+                return "device_revoked";
+            }
+            if !state.desktop.enabled().await {
+                return "desktop_disabled";
             }
         }
     };
-    tokio::select! { _ = upload => {}, _ = download => {}, _ = revoked => {} }
+    eprintln!("desktop session={session} opened");
+    let reason = tokio::select! { reason = upload => reason, reason = download => reason, reason = revoked => reason };
+    // Metadata only: never log RFB data, keys, passwords or device identity.
+    eprintln!(
+        "desktop session={session} closed reason={reason} duration_ms={} uploaded={uploaded} downloaded={downloaded}",
+        started.elapsed().as_millis()
+    );
 }
 
 #[cfg(test)]
@@ -275,6 +302,53 @@ mod tests {
             socket.next().await.unwrap().unwrap().into_data(),
             [0, 1, 2, 255].as_slice()
         );
+        // A quiet desktop must reply without waiting for the next screen update.
+        socket
+            .send(Frame::Ping(b"idle-heartbeat".to_vec().into()))
+            .await
+            .unwrap();
+        let reply = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .expect("idle desktop heartbeat stalled")
+            .unwrap()
+            .unwrap();
+        assert_eq!(reply, Frame::Pong(b"idle-heartbeat".to_vec().into()));
+        // High-volume screen updates and drag input must preserve every byte.
+        let payload: Vec<u8> = (0..4 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+        let (mut sender, mut receiver) = socket.split();
+        let send = async {
+            for chunk in payload.chunks(32 * 1024) {
+                sender
+                    .send(Frame::Binary(chunk.to_vec().into()))
+                    .await
+                    .unwrap();
+            }
+            sender
+                .send(Frame::Ping(b"busy-heartbeat".to_vec().into()))
+                .await
+                .unwrap();
+        };
+        let receive = async {
+            let mut received = Vec::new();
+            let mut pong = false;
+            while received.len() < payload.len() || !pong {
+                match receiver.next().await.unwrap().unwrap() {
+                    Frame::Binary(data) => received.extend_from_slice(&data),
+                    Frame::Pong(data) => {
+                        assert_eq!(data.as_ref(), b"busy-heartbeat");
+                        pong = true;
+                    }
+                    other => panic!("unexpected frame {other:?}"),
+                }
+            }
+            assert_eq!(received, payload);
+        };
+        tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(send, receive);
+        })
+        .await
+        .unwrap();
+        let mut socket = sender.reunite(receiver).unwrap();
         let revocation = serde_json::from_value(json!({"deviceID":id})).unwrap();
         assert_eq!(
             crate::security::revoke(State(state), Json(revocation))

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A0000000000000000000000E /* Resources/AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000D /* Resources/AppIcon.icns */; };
+		A00000000000000000000020 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000021 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,6 +25,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000020 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -68,6 +70,7 @@
 			);
 			name = AnywhereHost;
 			packageProductDependencies = (
+				A00000000000000000000021 /* Sparkle */,
 			);
 			productName = AnywhereHost;
 			productReference = A0000000000000000000000C /* AnywhereHost.app */;
@@ -97,6 +100,9 @@
 				Base,
 			);
 			mainGroup = A00000000000000000000004;
+			packageReferences = (
+				A00000000000000000000022 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			productRefGroup = A00000000000000000000005 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -188,7 +194,7 @@
 				CODE_SIGN_ENTITLEMENTS = Resources/AnywhereHost.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 775Y7KV7KU;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -198,7 +204,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.3;
+				MARKETING_VERSION = 0.1.4;
 				OTHER_CODE_SIGN_FLAGS = "$(inherited) --options runtime";
 				PRODUCT_BUNDLE_IDENTIFIER = com.jintongshu.AnywhereHost;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -213,7 +219,7 @@
 				CODE_SIGN_ENTITLEMENTS = Resources/AnywhereHost.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 775Y7KV7KU;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -223,7 +229,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.3;
+				MARKETING_VERSION = 0.1.4;
 				OTHER_CODE_SIGN_FLAGS = "$(inherited) --options runtime";
 				PRODUCT_BUNDLE_IDENTIFIER = com.jintongshu.AnywhereHost;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -254,6 +260,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A00000000000000000000022 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A00000000000000000000021 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A00000000000000000000022 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A00000000000000000000001 /* Project object */;
 }

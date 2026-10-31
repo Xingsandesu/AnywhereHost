@@ -53,6 +53,7 @@ private struct HostDashboardHeader: View {
             Image(systemName: "desktopcomputer")
                 .font(.system(size: 52, weight: .light)).foregroundStyle(.tint).accessibilityHidden(true)
             Text(Host.current().localizedName ?? "这台 Mac").font(.title.bold())
+            Text("版本 \(HostVersion.display)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             if starting { ProgressView("正在启动…").controlSize(.small) }
             else { HostStatusLabel(connected: available) }
         }.padding(.top, 8)

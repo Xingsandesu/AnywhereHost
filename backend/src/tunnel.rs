@@ -176,9 +176,40 @@ impl Tunnel {
         if let Some(code) = slot.as_mut().context("frpc 进程丢失")?.try_wait()? {
             anyhow::bail!("frpc 已退出（{code}）：{}", self.log_tail(&config.token));
         }
+        if let Err(error) = self.set_resume(true) {
+            if let Some(mut child) = slot.take() {
+                let _ = child.kill().await;
+            }
+            return Err(error);
+        }
         Ok(json!({"state":"starting","remotePort":config.remote_port}))
     }
+    fn set_resume(&self, enabled: bool) -> Result<()> {
+        private_write(
+            &self.dir.join("tunnel-resume.json"),
+            if enabled { b"true" } else { b"false" },
+        )
+    }
+    fn should_resume(&self) -> bool {
+        std::fs::read(self.dir.join("tunnel-resume.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<bool>(&bytes).ok())
+            .unwrap_or(false)
+    }
+    pub async fn restore(&self) {
+        if self.should_resume()
+            && let Some(config) = self.saved_config()
+            && self.start(config).await.is_err()
+        {
+            eprintln!("Saved tunnel could not resume; check tunnel diagnostics");
+        }
+    }
     pub async fn stop(&self) -> Result<Value> {
+        self.set_resume(false)?;
+        self.shutdown().await
+    }
+    // App quit / OTA restart preserves the user's intent; explicit Stop clears it.
+    pub async fn shutdown(&self) -> Result<Value> {
         if let Some(mut child) = self.child.lock().await.take()
             && child.try_wait()?.is_none()
         {
@@ -226,6 +257,19 @@ fn render(config: &TunnelConfig, local_port: u16) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn restart_preserves_intent_but_explicit_stop_clears_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let tunnel = Tunnel::new(dir.path().join("unused"), dir.path().to_owned(), 9443);
+        assert!(!tunnel.should_resume());
+        tunnel.set_resume(true).unwrap();
+        tunnel.shutdown().await.unwrap();
+        assert!(tunnel.should_resume());
+        tunnel.stop().await.unwrap();
+        assert!(!tunnel.should_resume());
+        std::fs::write(dir.path().join("tunnel-resume.json"), "broken").unwrap();
+        assert!(!tunnel.should_resume());
+    }
     #[test]
     fn configuration_cannot_inject_proxies() {
         let c = TunnelConfig {

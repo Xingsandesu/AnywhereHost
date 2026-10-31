@@ -76,7 +76,7 @@ does not enumerate Codex projects.
 - Resource APIs: rooted file listing/text, Git diff, events, tunnels, APNs registration
   and desktop proxy. An API does not imply an equivalent Mac editor or management UI.
 - Pending: worktree management, file editing, rich MCP forms,
-  desktop private-process attachment, notarization and automatic updates.
+  desktop private-process attachment and Developer ID notarization. Sparkle signed OTA is implemented; see DISTRIBUTION.md.
 
 Client interfaces and platform-specific features are documented in their own
 repositories; Host support does not establish complete desktop parity.

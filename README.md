@@ -1,39 +1,55 @@
-# Anywhere Host
+# AnywhereHost
 
-多设备远程 Codex 主机。SwiftUI 主机管理界面、Rust 后端和固定校验版本的 frpc 打包为一个 `AnywhereHost.app`；使用本机已安装的 Codex，不分发 Codex。
+把你的 Mac 变成随身可连接的 Codex 工作主机。原生 SwiftUI 管理界面、Rust 服务和 frp 隧道打包为一个 macOS App，提供设备配对、远程桌面、项目与会话协议。
 
-## 构建与运行
+**配套原生 iPhone 客户端 Anywhere 正在上架中。** 本仓库仅公开 Host，客户端独立开发，不包含在此仓库中。
+
+[下载最新版](https://github.com/Xingsandesu/AnywhereHost/releases/latest) · [更新记录](CHANGELOG.md) · [构建与 OTA](Docs/DISTRIBUTION.md) · [安全设计](Docs/SECURITY-V2.md)
+
+## 使用
+
+需要 Apple Silicon Mac、macOS 14+，以及已经登录的 Codex App 或 CLI。Host 使用本机已安装的 Codex，不分发 Codex。
+
+1. 下载 Release 中的 ZIP，解压并将 `AnywhereHost.app` 放入“应用程序”。当前发行包使用 Apple Development 签名，尚未完成 Developer ID 公证；首次启动可能需要在系统设置的“隐私与安全性”中允许打开。
+2. 启动 Host，完成设置向导。主界面和菜单栏显示版本号，应用菜单提供“检查更新…”。
+3. 在“连接设备”填写自有 frps 的地址、控制端口、映射端口和令牌。控制端口与映射端口须不同；默认转发本机 `127.0.0.1:9443` 的 HTTPS 服务。
+4. 使用客户端扫描二维码，完成一次性设备配对。配对票据五分钟有效，每个设备独立签名，Mac 可撤销设备。
+5. 使用远程桌面时，在 macOS 系统设置开启“屏幕共享”，再在 Host 中允许已配对设备连接。桌面复用原有 HTTPS/WSS 隧道，不需要暴露公网 5900 端口。
+
+升级到 0.1.4 后支持 Sparkle OTA：自动检查、提示下载，由用户选择安装并重启；更新包经过 Ed25519 签名验证。旧版没有更新器，需要先手动安装一次。OTA 不会覆盖配对、证书或配置。安装重启会中断当时的远程连接。已启动的隧道会在后续 App 重启 / OTA 后自动恢复；主动停止隧道则不会自动重启。
+
+## 功能与边界
+
+- Host 管理服务状态、设备、连接、权限、隧道和生命周期；项目、会话、模型与审批由客户端操作。
+- 原生协议支持流式事件、历史分页、文件读取、Git 状态、审批、任务和可选 APNs Live Activity 更新。
+- TLS 1.3、证书指纹固定验证、一次性配对、设备请求签名与防重放；不支持旧 Bearer 认证。
+- 远程桌面只连接本机屏幕共享，最多两个会话；屏幕共享仍需独立登录。不提供远程唤醒、音频或文件传输。
+- 依次使用已有控制 socket、已安装 App 内置运行时、CLI。独立启动的运行时共享磁盘数据，不代表接管正在运行的 Codex 桌面进程。
+- 关闭窗口保留服务；退出 App 停止其子进程。
+
+状态保存在 `~/Library/Application Support/AnywhereHost`。项目目录、登录、配置和会话 ID 保持原样。Host 不启用 App Sandbox，macOS 隐私控制和 Codex 原生审批仍然生效。请勿提交状态目录、密钥或配对二维码。
+
+## 开发
+
+源码使用 Xcode 27 / Swift 6、Rust 1.99+ 和 Python 3.11+。macOS 26+ 使用原生 Liquid Glass；较早系统使用标准材质。
 
 ```sh
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+swift test
 ./Scripts/build-app.sh
 open dist/AnywhereHost.app
 ```
 
-运行需要 macOS 14+ 和已登录的 Codex App 或 CLI。源码使用 Xcode 27 / Swift 6、Rust 1.99+ 构建。macOS 26+ 使用原生 Liquid Glass；较早系统使用标准材质。当前打包目标为 Apple Silicon，采用 Hardened Runtime 和本地 ad-hoc 签名，未接入公证或自动更新。
+构建脚本会下载校验固定版本的 frpc 与 Sparkle；打包需要可用的 Apple Development 或 Developer ID Application 签名身份。完整说明见 [开发指南](CONTRIBUTING.md)。
 
-Mac 应用仅提供服务状态、设备连接、隧道、远程桌面、权限和主机启停。项目、会话、模型与审批操作由远程客户端通过 Host 协议完成。Mac 管理界面不加载会话历史或订阅消息流。关闭窗口保留服务，退出应用停止其子进程。
+| 目录 | 职责 |
+| --- | --- |
+| `Sources/AnywhereHost` | 原生管理界面、权限、后端进程和更新器 |
+| `backend/src` | Host API、设备安全、Codex、桌面转发、隧道与事件存储 |
+| `Tests` | Swift 状态与权限回归 |
+| `Scripts` | 构建、版本、发布及隔离协议验证 |
+| `Resources` | Info.plist、权限声明和图标 |
+| `Docs` | 架构、安全、协议、运维与验收记录 |
 
-## 连接设备
-
-“连接设备”配置自有 frps 的地址、控制端口、映射端口和令牌。控制端口与映射端口必须不同；默认转发本机 `127.0.0.1:9443` 的 HTTPS 服务。CA 留空使用 frp 默认加密，填写 CA 可验证 frps 身份。Host HTTPS 独立使用证书指纹验证。
-
-二维码与链接携带地址、五分钟单设备配对票据和证书指纹，供支持安全协议 v2 的客户端导入。设备注册后使用独立密钥签名，Mac 可单独撤销设备。更新后需重新扫码；隧道进程运行不代表公网已可达。
-
-远程桌面默认关闭，在系统设置开启屏幕共享后，可允许已配对客户端通过现有 HTTPS/WSS 隧道连接。屏幕共享仍需独立身份验证；没有远程唤醒、音频或文件传输。
-
-## 运行时与数据
-
-依次使用已有控制 socket、已安装 App 内置运行时、CLI。保留原 `CODEX_HOME`、登录、配置、项目和会话 ID。独立启动的 App 运行时共享磁盘数据，不控制正在运行的桌面进程；外部会话可读取或分叉，不能直接修改。实际支持的方法由本机 schema 与 Host allowlist 共同决定。
-
-状态目录为 `~/Library/Application Support/AnywhereHost`，存放配置、凭证、TLS 身份、事件和日志。`config.json` 可指定监听地址、Codex 路径、控制 socket 和 frpc；APNs 可使用独立 `apns.json`。目录权限为 0700，凭证和私钥为 0600。应用不启用 App Sandbox，macOS 隐私控制和 Codex 原生审批仍然生效。
-
-## 文档与验证
-
-- [协议](Docs/API.md)
-- [架构](Docs/ARCHITECTURE.md)
-- [打包与分发](Docs/DISTRIBUTION.md)
-- [验证](Docs/VERIFICATION.md)
-- [流式同步](Docs/SYNC-PERFORMANCE.md)
-- [APNs](Docs/APNS.md)
-
-安全协议已硬切至 v2：一次性扫码配对、独立设备签名、TLS 1.3、自签证书指纹验证与设备撤销。需同时更新客户端并重新扫码；没有旧 Bearer 回退。[安全设计与验证](Docs/SECURITY-V2.md)
+[协议](Docs/API.md) · [架构](Docs/ARCHITECTURE.md) · [桌面排错](Docs/REMOTE-DESKTOP.md) · [验证](Docs/VERIFICATION.md) · [流式同步](Docs/SYNC-PERFORMANCE.md) · [APNs](Docs/APNS.md)

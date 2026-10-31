@@ -79,3 +79,15 @@ was mutated by tests.
 ## Security v2 (2026-10-31)
 
 See [security architecture and verification](SECURITY-V2.md): 44 Rust tests, 8 Mac tests, 72 HTTPS/WSS integration checks, 40 attack checks, dual-Host Swift proof interoperability, and independent signed desktop relay/revocation passed. Client: 157 tests passed, 2 external-network cases skipped. Custom self-signed TLS 1.3 remains supported; v1 bearer authentication is removed. Physical-device Secure Enclave/background delivery remains pending.
+
+## 0.1.4 release verification (2026-10-31)
+
+- Rust: 42 Host + 4 permission-probe tests; clippy all targets with warnings denied.
+- Desktop regression includes idle pong, 4 MiB simultaneous send/receive, byte ordering and revocation; loopback random port, no real screen input.
+- HTTPS/WSS fixture: 72 checks; security v2: 40 checks; frp fixture: forwarding, token reuse, conflict, auth failure and custom CA passed.
+- Swift build and 9 tests passed. Packaged app signature, Hardened Runtime, common Sparkle Team ID, version and OTA metadata checked.
+- Installed app UI displays `0.1.4 (7)` and Check for Updates. Actual native URLSession + local TLS pings passed for 25 seconds; public tunnel identity and status verified.
+- Separate private client: busy-frame / silent-peer heartbeat regressions and actual WKWebView RFB handshake, pixels and input passed. Client changes are not part of this repository or Host release.
+- Gitleaks scanned full Git history (21 pre-release commits) and the working directory with no findings.
+
+Real phone drag/disconnect diagnosis is still pending user reproduction; the above is not a claim of end-to-end resolution.
