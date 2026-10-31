@@ -124,13 +124,12 @@ pub fn prepare(dir: &Path) -> Result<(Config, String, String)> {
     let fingerprint = hex::encode(Sha256::digest(&output.stdout));
     // The v2 management key is independent; never retain the obsolete bearer secret.
     match fs::remove_file(dir.join("access-token")) {
-        Ok(()) => {},
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error).context("cannot remove obsolete access-token"),
     }
     Ok((config, token, fingerprint))
 }
-
 
 #[cfg(test)]
 mod tests {

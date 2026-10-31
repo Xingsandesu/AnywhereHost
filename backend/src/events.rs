@@ -23,8 +23,15 @@ impl Events {
         let db = Connection::open(path)?;
         db.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS owned_threads (id TEXT PRIMARY KEY);")?;
         crate::live_activity::initialize(&db)?;
-        let sequence = db.query_row("SELECT COALESCE(MAX(sequence),0) FROM events", [], |r| r.get::<_,i64>(0))?;
-        crate::live_activity::record_event(&db, &serde_json::json!({"method":"host/runtime/disconnected"}), sequence, crate::apns::now())?;
+        let sequence = db.query_row("SELECT COALESCE(MAX(sequence),0) FROM events", [], |r| {
+            r.get::<_, i64>(0)
+        })?;
+        crate::live_activity::record_event(
+            &db,
+            &serde_json::json!({"method":"host/runtime/disconnected"}),
+            sequence,
+            crate::apns::now(),
+        )?;
         db.execute(
             "INSERT OR IGNORE INTO metadata VALUES ('epoch', ?1)",
             [uuid::Uuid::new_v4().to_string()],

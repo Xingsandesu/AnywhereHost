@@ -9,7 +9,10 @@ pub fn bound_page(method: &str, params: &mut Value) {
         _ => return,
     };
     let default = if method == "thread/items/list" { 60 } else { 5 };
-    let limit = params["limit"].as_u64().unwrap_or(default).clamp(1, maximum);
+    let limit = params["limit"]
+        .as_u64()
+        .unwrap_or(default)
+        .clamp(1, maximum);
     params["limit"] = json!(limit);
     if method == "thread/turns/list" && params["itemsView"].is_null() {
         params["itemsView"] = json!("notLoaded");

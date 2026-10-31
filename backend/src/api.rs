@@ -39,8 +39,14 @@ pub struct AppState {
 }
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/v1/security/challenge", get(|| async { StatusCode::UNAUTHORIZED }))
-        .route("/v1/security/pair", post(|| async { StatusCode::UNAUTHORIZED }))
+        .route(
+            "/v1/security/challenge",
+            get(|| async { StatusCode::UNAUTHORIZED }),
+        )
+        .route(
+            "/v1/security/pair",
+            post(|| async { StatusCode::UNAUTHORIZED }),
+        )
         .route("/v1/security/ticket", post(crate::security::ticket))
         .route("/v1/security/devices", get(crate::security::devices))
         .route("/v1/security/devices/revoke", post(crate::security::revoke))
@@ -65,7 +71,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/tunnel/stop", post(tunnel_stop))
         .layer(DefaultBodyLimit::max(8 * 1024 * 1024))
         .layer(CompressionLayer::new())
-        .layer(middleware::from_fn_with_state(state.clone(), crate::security::guard))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::security::guard,
+        ))
         .with_state(state)
 }
 async fn status(State(s): State<Arc<AppState>>) -> Json<Value> {
@@ -85,15 +94,47 @@ async fn capabilities(State(s): State<Arc<AppState>>) -> Json<Value> {
     )
 }
 async fn activity_status(State(s): State<Arc<AppState>>) -> Json<Value> {
-    Json(json!({"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c|c.environments()).unwrap_or_default(),
-        "error":s.apns_error,"delivery":s.events.activity_status()}))
+    Json(
+        json!({"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c|c.environments()).unwrap_or_default(),
+        "error":s.apns_error,"delivery":s.events.activity_status()}),
+    )
 }
-async fn register_activity(State(s): State<Arc<AppState>>, Json(registration): Json<crate::live_activity::Registration>) -> Response {
-    if let Err(error) = registration.validate() { return (StatusCode::BAD_REQUEST, Json(json!({"error":error.to_string()}))).into_response() }
-    let Some(client) = &s.apns else { return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"APNs is not configured on this Host"}))).into_response() };
-    if !client.supports(registration.environment) { return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"APNs environment is not configured on this Host"}))).into_response() }
-    if !s.events.has_activity(&registration.thread_id,&registration.turn_id) {
-        let Some(codex) = s.codex.read().await.clone() else { return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"Codex is not connected"}))).into_response() };
+async fn register_activity(
+    State(s): State<Arc<AppState>>,
+    Json(registration): Json<crate::live_activity::Registration>,
+) -> Response {
+    if let Err(error) = registration.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error":error.to_string()})),
+        )
+            .into_response();
+    }
+    let Some(client) = &s.apns else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error":"APNs is not configured on this Host"})),
+        )
+            .into_response();
+    };
+    if !client.supports(registration.environment) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error":"APNs environment is not configured on this Host"})),
+        )
+            .into_response();
+    }
+    if !s
+        .events
+        .has_activity(&registration.thread_id, &registration.turn_id)
+    {
+        let Some(codex) = s.codex.read().await.clone() else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error":"Codex is not connected"})),
+            )
+                .into_response();
+        };
         let checkpoint = s.events.last_sequence();
         match codex.request("thread/turns/list", json!({"threadId":registration.thread_id,"limit":20,"itemsView":"full","sortDirection":"desc"})).await {
         Ok(turns) => {
@@ -107,13 +148,24 @@ async fn register_activity(State(s): State<Arc<AppState>>, Json(registration): J
     }
     match s.events.register_activity(&registration) {
         Ok(()) => Json(json!({"registered":true})).into_response(),
-        Err(error) => (StatusCode::BAD_REQUEST, Json(json!({"error":error.to_string()}))).into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error":error.to_string()})),
+        )
+            .into_response(),
     }
 }
-async fn remove_activity(State(s): State<Arc<AppState>>, Json(removal): Json<crate::live_activity::Removal>) -> Response {
+async fn remove_activity(
+    State(s): State<Arc<AppState>>,
+    Json(removal): Json<crate::live_activity::Removal>,
+) -> Response {
     match s.events.remove_activity(&removal) {
         Ok(()) => Json(json!({"removed":true})).into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":"Could not remove activity registration"}))).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error":"Could not remove activity registration"})),
+        )
+            .into_response(),
     }
 }
 // Exposes the same mutation gate used by RPC policy, so clients can offer a native fork action.
@@ -260,7 +312,9 @@ async fn events(
             let revoked = async {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    if !s.security.active(&principal) { break; }
+                    if !s.security.active(&principal) {
+                        break;
+                    }
                 }
             };
             tokio::select! {
@@ -279,9 +333,16 @@ async fn stream(
     principal: crate::security::Principal,
 ) {
     for event in replay {
-        if !state.security.active(&principal) { return; }
+        if !state.security.active(&principal) {
+            return;
+        }
         last = event.sequence;
-        if send_event(&mut socket, Message::Text(serde_json::to_string(&event).unwrap().into())).await.is_err()
+        if send_event(
+            &mut socket,
+            Message::Text(serde_json::to_string(&event).unwrap().into()),
+        )
+        .await
+        .is_err()
         {
             return;
         }
@@ -303,7 +364,10 @@ async fn stream(
     }
 }
 async fn send_event(socket: &mut WebSocket, message: Message) -> Result<(), ()> {
-    tokio::time::timeout(std::time::Duration::from_secs(10), socket.send(message)).await.map_err(|_| ())?.map_err(|_| ())
+    tokio::time::timeout(std::time::Duration::from_secs(10), socket.send(message))
+        .await
+        .map_err(|_| ())?
+        .map_err(|_| ())
 }
 async fn tunnel_status(State(s): State<Arc<AppState>>) -> Json<Value> {
     Json(s.tunnel.status().await)
@@ -394,10 +458,13 @@ async fn project_image(
     Path(id): Path<String>,
     Query(q): Query<FileQuery>,
 ) -> Response {
-    workspace_reply(async {
-        let root = project_root(&s, &id, q.root).await?;
-        crate::workspace::image(&root, &q.path).await
-    }.await)
+    workspace_reply(
+        async {
+            let root = project_root(&s, &id, q.root).await?;
+            crate::workspace::image(&root, &q.path).await
+        }
+        .await,
+    )
 }
 async fn project_git(
     State(s): State<Arc<AppState>>,

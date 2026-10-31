@@ -24,7 +24,8 @@ impl TextOffsets {
         let turn = p["turnId"].as_str().unwrap_or("").to_owned();
         if method == "turn/completed" {
             let completed = p["turn"]["id"].as_str().unwrap_or("");
-            self.items.retain(|(t, r, _), _| t != &thread || r != completed);
+            self.items
+                .retain(|(t, r, _), _| t != &thread || r != completed);
             return;
         }
         if method == "item/started" || method == "item/completed" {
@@ -38,14 +39,24 @@ impl TextOffsets {
                 return;
             }
             let length = match item["type"].as_str() {
-                Some("agentMessage" | "plan") => Position::Text(item["text"].as_str().unwrap_or("").len()),
-                Some("commandExecution") => {
-                    Position::Text(item["command"].as_str().map_or(0, |command| command.len() + 1)
-                        + item["aggregatedOutput"].as_str().unwrap_or("").len())
+                Some("agentMessage" | "plan") => {
+                    Position::Text(item["text"].as_str().unwrap_or("").len())
                 }
-                Some("reasoning") => Position::Summaries(item["summary"].as_array().map_or_else(Vec::new, |parts| {
-                    parts.iter().take(128).map(|part| part.as_str().unwrap_or("").len()).collect()
-                })),
+                Some("commandExecution") => Position::Text(
+                    item["command"]
+                        .as_str()
+                        .map_or(0, |command| command.len() + 1)
+                        + item["aggregatedOutput"].as_str().unwrap_or("").len(),
+                ),
+                Some("reasoning") => {
+                    Position::Summaries(item["summary"].as_array().map_or_else(Vec::new, |parts| {
+                        parts
+                            .iter()
+                            .take(128)
+                            .map(|part| part.as_str().unwrap_or("").len())
+                            .collect()
+                    }))
+                }
                 _ => return,
             };
             // Bound memory if a runtime never emits completion. Eviction only
@@ -54,14 +65,24 @@ impl TextOffsets {
                 self.items.clear();
             }
             self.items.insert(key, length);
-        } else if matches!(method.as_str(), "item/agentMessage/delta" | "item/plan/delta" | "item/commandExecution/outputDelta" | "item/reasoning/summaryTextDelta") {
+        } else if matches!(
+            method.as_str(),
+            "item/agentMessage/delta"
+                | "item/plan/delta"
+                | "item/commandExecution/outputDelta"
+                | "item/reasoning/summaryTextDelta"
+        ) {
             let (Some(id), Some(delta)) = (p["itemId"].as_str(), p["delta"].as_str()) else {
                 return;
             };
             let summary = if method == "item/reasoning/summaryTextDelta" {
-                let Some(index) = p["summaryIndex"].as_u64().filter(|i| *i < 128) else { return };
+                let Some(index) = p["summaryIndex"].as_u64().filter(|i| *i < 128) else {
+                    return;
+                };
                 Some(index as usize)
-            } else { None };
+            } else {
+                None
+            };
             let offset = match (self.items.get_mut(&(thread, turn, id.to_owned())), summary) {
                 (Some(Position::Text(offset)), None) => offset,
                 (Some(Position::Summaries(parts)), Some(index)) => {
@@ -73,7 +94,9 @@ impl TextOffsets {
             let start = *offset;
             *offset += delta.len();
             p["hostTextOffset"] = Value::from(start);
-            if let Some(index) = summary { p["hostSummaryIndex"] = Value::from(index); }
+            if let Some(index) = summary {
+                p["hostSummaryIndex"] = Value::from(index);
+            }
         }
     }
 }
@@ -104,7 +127,9 @@ mod tests {
         let mut delta = json!({"method":"item/commandExecution/outputDelta","params":{"threadId":"t","turnId":"r","itemId":"i","delta":"/tmp"}});
         offsets.annotate(&mut delta);
         assert_eq!(delta["params"]["hostTextOffset"], 4);
-        offsets.annotate(&mut json!({"method":"turn/completed","params":{"threadId":"t","turn":{"id":"r"}}}));
+        offsets.annotate(
+            &mut json!({"method":"turn/completed","params":{"threadId":"t","turn":{"id":"r"}}}),
+        );
         assert!(offsets.items.is_empty());
     }
 

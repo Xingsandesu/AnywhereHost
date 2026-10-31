@@ -19,16 +19,23 @@ fn issue(error: io::Error) -> &'static str {
 }
 
 pub fn check(path: &Path) -> DirectoryAccess {
-    let mut result = DirectoryAccess { readable: false, writable: false, issue: None };
+    let mut result = DirectoryAccess {
+        readable: false,
+        writable: false,
+        issue: None,
+    };
     // Enumerate at most one entry; never return names or read existing contents.
-    let read = std::fs::read_dir(path).and_then(|mut entries| entries.next().transpose().map(|_| ()));
+    let read =
+        std::fs::read_dir(path).and_then(|mut entries| entries.next().transpose().map(|_| ()));
     if let Err(error) = read {
         result.issue = Some(issue(error));
         return result;
     }
     result.readable = true;
     let write = (|| -> io::Result<()> {
-        let mut file = tempfile::Builder::new().prefix(".anywhere-access-").tempfile_in(path)?;
+        let mut file = tempfile::Builder::new()
+            .prefix(".anywhere-access-")
+            .tempfile_in(path)?;
         file.write_all(b"Anywhere Host access check\n")?;
         file.flush()?;
         file.close()
