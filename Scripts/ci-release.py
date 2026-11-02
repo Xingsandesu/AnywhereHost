@@ -140,7 +140,11 @@ def publish(directory, tag, sha):
     subprocess.run(['gh', 'release', 'create', tag, '--repo', repository, '--target', sha,
                     '--draft', '--prerelease', '--latest=false', '--title', 'AnywhereHost ' + tag,
                     '--notes-file', str(directory / 'notes.md'), *map(str, assets)], check=True)
-    release = gh_api(f'repos/{repository}/releases/tags/{tag}')
+    # REST's tag endpoint only finds published tags. gh also resolves a draft's
+    # pending tag through GraphQL; use that ID for the authoritative REST data.
+    release_id = json.loads(subprocess.check_output(
+        ['gh', 'release', 'view', tag, '--repo', repository, '--json', 'databaseId'], text=True))['databaseId']
+    release = gh_api(f'repos/{repository}/releases/{release_id}')
     expected = {path.name: 'sha256:' + digest(path) for path in assets}
     actual = {asset['name']: asset.get('digest') for asset in release['assets']}
     if actual != expected or not release['draft'] or not release['prerelease'] or release['target_commitish'] != sha:
