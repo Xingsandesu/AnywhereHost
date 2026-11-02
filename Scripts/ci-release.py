@@ -150,6 +150,10 @@ def publish(directory, tag, sha):
     if actual != expected or not release['draft'] or not release['prerelease'] or release['target_commitish'] != sha:
         raise ValueError('Draft release provenance/assets differ; left draft unpublished')
     subprocess.run(['gh', 'release', 'edit', tag, '--repo', repository, '--draft=false', '--latest=false'], check=True)
+    # Publishing replaces the draft's untagged-* URLs with the real tag URLs.
+    release = gh_api(f'repos/{repository}/releases/{release_id}')
+    if release['draft'] or release['tag_name'] != tag:
+        raise ValueError('Release did not become public under the expected tag')
     # Verify the public, anonymous download path after publishing.
     with tempfile.TemporaryDirectory(prefix='anywhere-public-check-') as temporary:
         for asset in release['assets']:

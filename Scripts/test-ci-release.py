@@ -3,9 +3,13 @@
 import copy
 import hashlib
 import importlib.util
+import io
+import json
+import os
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('ci_release', pathlib.Path(__file__).with_name('ci-release.py'))
 release = importlib.util.module_from_spec(spec)
@@ -94,6 +98,45 @@ class PackageTests(unittest.TestCase):
             self.manifest.symlink_to(target)
             with self.assertRaises(ValueError):
                 release.package(self.directory, 'arm64')
+
+
+class PublicationTests(unittest.TestCase):
+    def test_downloads_use_published_urls_not_draft_urls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            contents = {'AnywhereHost-0.1.4-macos-arm64-notarized.zip': b'archive',
+                        'SHA256SUMS': b'manifest'}
+            for name, data in contents.items():
+                (directory / name).write_bytes(data)
+            (directory / 'notes.md').write_text('fixture')
+            sha = 'a' * 40
+            tag = 'v0.1.4-signed.' + sha[:12]
+            draft = {
+                'draft': True, 'prerelease': True, 'target_commitish': sha,
+                'tag_name': tag, 'html_url': 'https://github.com/example/repo/releases/tag/untagged-draft',
+                'assets': [{'name': name, 'digest': 'sha256:' + hashlib.sha256(data).hexdigest(),
+                            'browser_download_url': 'https://github.com/example/repo/releases/download/untagged-draft/' + name}
+                           for name, data in contents.items()],
+            }
+            published = copy.deepcopy(draft)
+            published['draft'] = False
+            published['html_url'] = published['html_url'].replace('untagged-draft', tag)
+            for asset in published['assets']:
+                asset['browser_download_url'] = asset['browser_download_url'].replace('untagged-draft', tag)
+
+            def download(url, **kwargs):
+                self.assertNotIn('untagged-draft', url)
+                self.assertIn('/' + tag + '/', url)
+                return io.BytesIO(contents[url.rsplit('/', 1)[1]])
+
+            with patch.dict(os.environ, GITHUB_REPOSITORY='example/repo'), \
+                    patch.object(release.subprocess, 'run'), \
+                    patch.object(release.subprocess, 'check_output', return_value=json.dumps({'databaseId': 42})), \
+                    patch.object(release, 'gh_api', side_effect=[draft, published]), \
+                    patch.object(release.urllib.request, 'urlopen', side_effect=download) as fetch, \
+                    patch('sys.stdout', new_callable=io.StringIO):
+                release.publish(directory, tag, sha)
+                self.assertEqual(fetch.call_count, len(contents))
 
 
 if __name__ == '__main__':
