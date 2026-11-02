@@ -72,6 +72,49 @@ with tempfile.TemporaryDirectory(prefix='anywhere-gtk-test-') as temporary:
                 assert app.tray.node(0, -1)[2][-1].unpack()[0] == 5
                 app.activate_action('permissions', None)
                 assert app.stack.get_visible_child_name() == '权限'
+                app.stack.set_visible_child_name('远程桌面')
+                app.stop_button.emit('clicked')
+                phase[0] = 4
+            elif phase[0] == 4:
+                assert not service.running and not app.online
+                assert not app.desktop_enable.get_sensitive()
+                assert app.desktop_password_save.get_sensitive(), 'Saving must work with Host stopped'
+                app.desktop_password.set_text('short')
+                app.desktop_password_save.emit('clicked')
+                phase[0] = 5
+            elif phase[0] == 5:
+                assert '密码未保存' in app.desktop_password_status.get_text()
+                assert app.desktop_password.get_text() == 'short', 'Keep failed input for correction'
+                assert not service.has_desktop_password()
+                app.desktop_password.set_text('test1234')
+                app.desktop_password_save.emit('clicked')
+                phase[0] = 6
+            elif phase[0] == 6:
+                assert service.has_desktop_password(), app.message.get_text()
+                assert not (directory / 'desktop.json').exists(), 'Saving must not enable sharing'
+                assert app.desktop_password.get_text() == ''
+                assert '密码已保存' in app.desktop_password_status.get_text()
+                app.start_button.emit('clicked')
+                phase[0] = 7
+            elif phase[0] == 7 and app.online:
+                assert app.desktop_enable.get_sensitive(), app.desktop_status.get_text()
+                app.desktop_enable.emit('clicked')
+                phase[0] = 8
+            elif phase[0] == 8:
+                assert app.desktop_enabled, app.message.get_text()
+                assert not app.desktop_enable.get_sensitive()
+                assert app.desktop_password_save.get_sensitive(), 'Saving must work with sharing enabled'
+                app.desktop_password.set_text('new12345')
+                app.desktop_password_save.emit('clicked')
+                phase[0] = 9
+            elif phase[0] == 9:
+                assert app.desktop_password.get_text() == ''
+                assert '密码已保存' in app.desktop_password_status.get_text()
+                assert app.desktop_enabled
+                app.desktop_disable.emit('clicked')
+                phase[0] = 10
+            elif phase[0] == 10:
+                assert not app.desktop_enabled, app.message.get_text()
                 app.activate_action('quit', None)
                 return GLib.SOURCE_REMOVE
         except BaseException as error:
@@ -87,7 +130,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-gtk-test-') as temporary:
         assert not service.running
         if errors:
             raise errors[0]
-        print('PASS GTK setup gating/persistence, 8 management pages, pairing/clipboard, permissions, background close, reopen, tray menu and explicit quit')
+        print('PASS GTK setup, 8 pages, pairing, permissions, tray, offline password save, validation errors, password change while sharing and explicit quit')
     finally:
         service.stop()
         app.updater.close()

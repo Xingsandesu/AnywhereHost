@@ -14,7 +14,9 @@ parser.add_argument('--desktop', action='store_true', help='Test real desktop ca
 parser.add_argument('--ui', action='store_true', help='Also run GTK smoke (requires display, e.g. xvfb-run)')
 args = parser.parse_args()
 package = args.package.resolve()
-assert subprocess.check_output(['dpkg-deb', '-f', str(package), 'Architecture'], text=True).strip() == 'amd64'
+architecture = subprocess.check_output(['dpkg', '--print-architecture'], text=True).strip()
+assert architecture in ('amd64', 'arm64'), f'Unsupported native architecture: {architecture}'
+assert subprocess.check_output(['dpkg-deb', '-f', str(package), 'Architecture'], text=True).strip() == architecture
 with tempfile.TemporaryDirectory(prefix='anywhere-deb-check-') as temporary:
     directory = Path(temporary)
     archive = directory / 'data.tar'
@@ -30,6 +32,13 @@ with tempfile.TemporaryDirectory(prefix='anywhere-deb-check-') as temporary:
     lib = directory / 'usr/lib/anywhere-host'
     for binary in ('anywhere-host', 'anywhere-permission-probe', 'frpc', 'w0vncserver', 'x0vncserver', 'vncpasswd', 'install-update'):
         assert os.access(lib / binary, os.X_OK), binary
+    # Check actual ELF headers as well as package metadata; mislabeled binaries
+    # can otherwise be hidden by binfmt emulation on a build machine.
+    for binary in ('anywhere-host', 'anywhere-permission-probe', 'frpc', 'w0vncserver', 'x0vncserver', 'vncpasswd'):
+        with (lib / binary).open('rb') as executable:
+            header = executable.read(20)
+        assert header[:6] == b'\x7fELF\x02\x01', f'{binary}: expected 64-bit little-endian ELF'
+        assert int.from_bytes(header[18:20], 'little') == {'amd64': 62, 'arm64': 183}[architecture], f'{binary}: wrong ELF architecture'
     for binary in ('anywhere-host', 'anywhere-permission-probe', 'w0vncserver', 'x0vncserver', 'vncpasswd'):
         assert str(Path.home()).encode() not in (lib / binary).read_bytes(), 'Builder Home leaked into ELF'
     assert (directory / 'usr/share/doc/anywhere-host/frp-LICENSE').is_file()

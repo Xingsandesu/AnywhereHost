@@ -1,0 +1,127 @@
+name: Build packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Do not cancel earlier pushes: every pushed revision should get its own packages.
+jobs:
+  linux:
+    name: Debian 13 ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    container: debian:13
+    env:
+      CARGO_HOME: /opt/cargo
+      RUSTUP_HOME: /opt/rustup
+    steps:
+      - name: Install build and GTK test dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential dpkg-dev openssl python3 python3-gi python3-qrcode gir1.2-gtk-4.0 xvfb xauth dbus-daemon python3-cryptography cmake pkg-config libx11-dev libxext-dev libxdamage-dev libxfixes-dev libxrandr-dev libxtst-dev zlib1g-dev libpixman-1-dev libjpeg62-turbo-dev libpam0g-dev libgnutls28-dev libglib2.0-dev libpipewire-0.3-dev uuid-dev libwayland-dev libxkbcommon-dev
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+          sh /tmp/rustup-init.sh -y --default-toolchain stable --profile minimal --component clippy,rustfmt
+          useradd --create-home builder
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check native architecture
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
+      - name: Validate and package as an ordinary desktop user
+        run: |
+          chown -R builder:builder "$GITHUB_WORKSPACE" /opt/cargo /opt/rustup
+          runuser -u builder -- env PATH="/opt/cargo/bin:$PATH" bash -e -o pipefail -c '
+            python3 Scripts/version.py
+            cargo fmt --all --check
+            cargo build --locked --bins
+            cargo test --locked
+            cargo clippy --locked --all-targets -- -D warnings
+            python3 Scripts/verify-host.py
+            python3 Scripts/fetch-frpc.py
+            python3 Scripts/verify-frp.py
+            python3 Scripts/build-deb.py
+            # Runs Python/GTK/desktop tests against the complete package,
+            # including vncpasswd, which is not supplied by cargo build.
+            xvfb-run -a dbus-run-session -- python3 Scripts/verify-deb.py dist/*.deb --ui --desktop
+            cd dist
+            sha256sum ./*.deb > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          '
+      - name: Upload Debian package and checksum
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: anywhere-host-linux-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            dist/*.deb
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  macos:
+    name: macOS arm64
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Prepare native build tools
+        run: |
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Validate Rust and Swift sources
+        run: |
+          python3 Scripts/version.py
+          cargo fmt --all --check
+          cargo build --locked --bins
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+          python3 Scripts/verify-host.py
+          swift build
+          swift test
+      - name: Build and verify unsigned arm64 app
+        run: |
+          ./Scripts/build-app.sh --unsigned
+          python3 Scripts/verify-app.py dist/AnywhereHost.app --unsigned --integration
+          python3 Scripts/verify-frp.py
+      - name: Archive app and checksum
+        run: |
+          version=$(python3 Scripts/version.py | cut -d ' ' -f 1)
+          archive="AnywhereHost-${version}-macos-arm64-unsigned.zip"
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent AnywhereHost.app "$archive"
+          shasum -a 256 "$archive" > SHA256SUMS
+          shasum -a 256 --check SHA256SUMS
+      - name: Upload macOS package and checksum
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: anywhere-host-macos-arm64-unsigned-${{ github.sha }}
+          path: |
+            dist/*-macos-arm64-unsigned.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

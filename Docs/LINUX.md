@@ -1,6 +1,6 @@
 # Debian 13 Host
 
-目标为 **Debian 13（trixie）amd64 / x86_64，GNOME Wayland 桌面**，并提供 X11 共享后端。GTK 4 / PyGObject 管理界面复用项目的 Rust Host 与协议 v2；Codex 由用户自行安装，不随包分发。
+构建目标为 **Debian 13（trixie）amd64 / x86_64 和 arm64 / aarch64，GNOME Wayland 桌面**，并提供 X11 共享后端。GTK 4 / PyGObject 管理界面复用项目的 Rust Host 与协议 v2；Codex 由用户自行安装，不随包分发。现有本地实测记录来自 amd64；arm64 的原生构建与隔离测试由新增 GitHub CI 执行，结果以对应运行记录为准。
 
 ## 与 macOS Host 对应的功能
 
@@ -23,11 +23,13 @@ Linux 没有 macOS 的 TCC“完全磁盘访问”授权位。文件和自动化
 ## 安装与使用
 
 ```sh
-sudo apt install ./anywhere-host_0.1.4-2_amd64.deb
+sudo apt install ./anywhere-host_0.1.4-3_amd64.deb
 anywhere-host-gtk
 ```
 
 也可以从应用菜单启动。完成向导前，需要已经安装、登录 Codex App 或 CLI。已有配置会在打开应用时自动启动服务；新安装在向导中启动。关窗后服务继续运行；应用菜单或状态图标中的“退出”会关闭其自有 Host、frpc、桌面共享及独立 Codex 子进程，不停止外部共享 Codex。
+
+arm64 使用同版本的 `_arm64.deb`；可用 `dpkg --print-architecture` 确认系统架构。每次 push 的开发构建可从 [GitHub Actions artifacts](DISTRIBUTION.md#github-自动构建) 下载。
 
 GNOME 的状态图标需要 `gnome-shell-extension-appindicator`（包推荐依赖）。安装后如当前会话尚未发现扩展，重新登录，再点击“启用 GNOME 状态图标”。其他支持 StatusNotifierItem 的桌面直接显示图标。没有托盘宿主时仍可后台驻留，并通过应用菜单重新打开窗口；UI 明确显示托盘连接状态。
 
@@ -35,7 +37,9 @@ GNOME 的状态图标需要 `gnome-shell-extension-appindicator`（包推荐依�
 
 ### 桌面共享
 
-在“远程桌面”设置独立的 **8 位 ASCII VNC 密码**，点击“允许已配对设备连接”。在密码栏再次填写密码后点击“授权并检查屏幕与输入”，并在本机系统弹窗中选择屏幕、允许控制。也可以由首次已认证的客户端连接触发授权。桌面门户决定能否记住授权；Host 不绕过系统弹窗。
+在“远程桌面”填写独立的 **恰好 8 位可打印 ASCII VNC 密码**（半角字母、数字或符号），点击“保存密码”，确认显示“密码已保存”后，再点击“允许已配对设备连接”。保存密码不依赖服务是否启动或共享是否开启，也不会自动开启共享；共享开启后仍可修改密码，新连接使用新密码，已有连接不因此断开。保存失败会在密码栏下显示原因并保留输入，便于修改。
+
+在密码栏再次填写已保存的密码后点击“授权并检查屏幕与输入”，并在本机系统弹窗中选择屏幕、允许控制。此按钮检查已有密码与授权，不负责保存密码。也可以由首次已认证的客户端连接触发授权。桌面门户决定能否记住授权；Host 不绕过系统弹窗。
 
 Rust 根据运行会话选择打包的 `w0vncserver`（Wayland）或 `x0vncserver`（X11）。helper 只监听状态目录下的 0600 Unix socket，不开放 TCP VNC 端口。远程设备经 TLS 1.3、Host v2 设备证明和独立 VNC 认证访问。最多两个远程桌面连接；关闭开关、退出 Host 或撤销设备会终止相应连接。保留现有 WSS 心跳、超时和流量日志，不转发剪贴板、音频或文件。
 
@@ -53,7 +57,7 @@ Rust 根据运行会话选择打包的 `w0vncserver`（Wayland）或 `x0vncserve
 
 包包含 GTK、Rust、checksum-pinned frpc 0.71.1，以及从 checksum-pinned TigerVNC 1.16.2 源码构建的三个独立 helper。附带 frp/TigerVNC 许可证和 TigerVNC 完整对应源码与构建脚本。Rust/C++ 构建使用路径映射，不将构建者 Home 写入 ELF。
 
-自动检查仅查询 Release，不自动下载或安装。发布方上传 `anywhere-host_<版本>-<修订>_amd64.deb` 与同名 `.deb.sig`。签名使用与 macOS Host 相同的 Ed25519 公钥（来自 Info.plist）；没有合法签名的发行包不会显示成可安装更新。
+自动检查仅查询 Release，不自动下载或安装。发布方上传 `anywhere-host_<版本>-<修订>_<amd64或arm64>.deb` 与同名 `.deb.sig`；更新器按本机 Debian 架构选择包，下载验证和特权安装再次拒绝架构不匹配的包。签名使用与 macOS Host 相同的 Ed25519 公钥（来自 Info.plist）；没有合法签名的发行包不会显示成可安装更新。
 
 ```sh
 python3 Scripts/sign-deb.py dist/anywhere-host_0.1.5-1_amd64.deb --key /secure/path/host-ed25519.pem
@@ -63,7 +67,7 @@ python3 Scripts/sign-deb.py dist/anywhere-host_0.1.5-1_amd64.deb --key /secure/p
 
 ## 构建与验证
 
-原生 Debian 13 amd64，Rust stable。依赖：
+原生 Debian 13 amd64 或 arm64，Rust stable。依赖：
 
 ```sh
 sudo apt install build-essential dpkg-dev curl git openssl python3 python3-gi \
@@ -76,15 +80,15 @@ cargo build --locked --bins
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 python3 Scripts/verify-host.py
-python3 -m unittest discover -s Linux/tests -v
-xvfb-run -a dbus-run-session -- python3 Scripts/verify-linux-ui.py
 python3 Scripts/fetch-frpc.py
 python3 Scripts/verify-frp.py
 python3 Scripts/build-deb.py
 xvfb-run -a dbus-run-session -- python3 Scripts/verify-deb.py dist/*.deb --ui --desktop
 ```
 
-也可用 `build-deb.py --desktop-container` 在 Debian 容器中构建桌面 helper，无需给宿主安装 C++ 开发依赖。构建不需 root；包架构、ELF 依赖和 Cargo 版本自动读取，首批明确限定 Debian 13 amd64。
+`verify-deb.py` 会提取完整包并执行 Python 管理、更新、密码测试及所选 GTK / 桌面检查。密码测试需要包内真实的 `vncpasswd`，因此全新工作区须先打包；只有 `cargo build` 的目录不包含该工具。
+
+也可用 `build-deb.py --desktop-container` 在 Debian 容器中构建桌面 helper，无需给宿主安装 C++ 开发依赖。构建不需 root；包架构、ELF 依赖和 Cargo 版本自动读取，限定原生 Debian 13 amd64 / arm64。包验证检查六个 ELF 可执行文件的实际架构及包元数据，并运行提取后的服务与桌面 fixture。
 
 `verify-linux-desktop.py` 仅允许在显式标记的隔离 Xvfb 中运行，验证真实画面、键盘、鼠标、独立 VNC 认证、会话上限和关闭共享。`smoke-real-codex.py` 是独立只读检查，不启用 `--inference`，共享模式不执行 `thread/resume`。SwiftUI / Sparkle 构建仅适用于 macOS；当前 Linux 主机没有 Swift，不能据此声称 macOS 构建已通过。
 

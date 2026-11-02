@@ -3,6 +3,7 @@ import fcntl
 import json
 import os
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -110,26 +111,42 @@ class HostService:
                     child.kill()
                     child.wait()
 
-    def set_desktop(self, enabled, password=''):
-        if password:
-            if len(password) != 8 or not password.isascii() or any(ord(c) < 32 for c in password):
-                raise ValueError('桌面密码须为 8 位 ASCII 字符（VNC 协议限制）')
+    def has_desktop_password(self):
+        try:
+            metadata = (self.directory / 'desktop.passwd').lstat()
+        except FileNotFoundError:
+            return False
+        return (stat.S_ISREG(metadata.st_mode) and metadata.st_size == 8
+                and metadata.st_mode & 0o077 == 0)
+
+    def save_desktop_password(self, password):
+        if len(password) != 8 or any(not 32 <= ord(c) <= 126 for c in password):
+            raise ValueError('桌面密码须恰好为 8 位半角字母、数字或符号（VNC 协议限制）')
+        try:
             result = subprocess.run([str(self.binary.with_name('vncpasswd')), '-f'],
                 input=(password + '\n').encode(), capture_output=True, check=True, timeout=5)
-            if len(result.stdout) != 8:
-                raise RuntimeError('桌面密码生成失败')
-            path = self.directory / 'desktop.passwd'
-            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as output:
-                temporary = Path(output.name)
-                try:
-                    output.write(result.stdout)
-                    output.flush()
-                    os.fsync(output.fileno())
-                    os.replace(temporary, path)
-                finally:
-                    temporary.unlink(missing_ok=True)
-        if enabled and not (self.directory / 'desktop.passwd').is_file():
+        except FileNotFoundError as error:
+            raise RuntimeError('缺少桌面密码工具 vncpasswd，请重新安装完整的 AnywhereHost 软件包') from error
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError('桌面密码生成失败，请重试或重新安装完整的 AnywhereHost 软件包') from error
+        if len(result.stdout) != 8:
+            raise RuntimeError('桌面密码生成失败')
+        path = self.directory / 'desktop.passwd'
+        self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as output:
+            temporary = Path(output.name)
+            try:
+                output.write(result.stdout)
+                output.flush()
+                os.fsync(output.fileno())
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+    def set_desktop(self, enabled, password=''):
+        if password:
+            self.save_desktop_password(password)
+        if enabled and not self.has_desktop_password():
             raise ValueError('请先设置独立的桌面密码')
         private_json(self.directory / 'desktop.json', {'enabled': bool(enabled)})
 

@@ -222,7 +222,7 @@ class HostApplication(Gtk.Application, ManagementPanels):
             self.open_setup()
         GLib.timeout_add_seconds(15, self.automatic_update_check)
 
-    def work(self, operation, done=None, quiet=False):
+    def work(self, operation, done=None, quiet=False, failed=None):
         if self.busy or self.closing:
             return
         self.busy = True
@@ -248,6 +248,8 @@ class HostApplication(Gtk.Application, ManagementPanels):
                         self.clear_pair()
                     else:
                         self.message.set_text(f'操作失败：{error}')
+                        if failed:
+                            failed(error)
                 self.update_buttons()
                 return GLib.SOURCE_REMOVE
             GLib.idle_add(deliver)
@@ -264,6 +266,8 @@ class HostApplication(Gtk.Application, ManagementPanels):
             button.set_sensitive(ready and self.online)
         self.desktop_enable.set_sensitive(ready and self.online and self.desktop_supported and not self.desktop_enabled)
         self.desktop_disable.set_sensitive(ready and self.online and self.desktop_enabled)
+        self.desktop_password.set_sensitive(ready)
+        self.desktop_authorize.set_sensitive(ready and self.online and self.desktop_supported and self.desktop_enabled)
         self.download_button.set_sensitive(ready and self.updater.candidate is not None)
         self.install_button.set_sensitive(ready and self.updater.downloaded is not None)
         self.copy_pair.set_sensitive(bool(self.pair_link.get_text()))

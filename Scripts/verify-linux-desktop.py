@@ -72,12 +72,20 @@ with tempfile.TemporaryDirectory(prefix='anywhere-real-rfb-') as directory:
         else:
             raise AssertionError(service.log_tail() + (state / 'desktop.log').read_text())
         assert '已授权' in authorize(state, 'test1234', service.cancelled)
+        service.save_desktop_password('new12345')
+        try:
+            authorize(state, 'test1234', service.cancelled)
+        except ValueError as error:
+            assert '密码错误' in str(error)
+        else:
+            raise AssertionError('Old password still accepted after saving the new password')
+        assert '已授权' in authorize(state, 'new12345', service.cancelled)
         assert (state / 'desktop.sock').stat().st_mode & 0o777 == 0o600
         a = DesktopSocket(port, client.key.decode(), client.certificate)
         connections.append(a)
         assert a.status == 101
         rfb = RFB(a)
-        width, height = rfb.authenticate('test1234')
+        width, height = rfb.authenticate('new12345')
         assert width > 0 and height > 0
         # Request an actual framebuffer rectangle, using the portable raw encoding.
         a.send(b'\x02\0\0\x01' + struct.pack('!i', 0))
@@ -127,7 +135,7 @@ with tempfile.TemporaryDirectory(prefix='anywhere-real-rfb-') as directory:
         time.sleep(1.2)
         assert not client.request('/v1/desktop')['reachable']
         assert not (state / 'desktop.sock').exists()
-        print('PASS actual Linux framebuffer, keyboard/pointer input, independent VNC auth, private socket, two-session limit and local revocation over signed WSS')
+        print('PASS actual Linux framebuffer, keyboard/pointer input, password replacement and old-password rejection, private socket, two-session limit and local revocation over signed WSS')
     finally:
         for connection in connections:
             connection.close()
