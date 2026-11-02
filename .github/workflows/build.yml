@@ -47,6 +47,7 @@ jobs:
           runuser -u builder -- env PATH="/opt/cargo/bin:$PATH" bash -e -o pipefail -c '
             python3 Scripts/version.py
             python3 Scripts/test-ci-release.py
+            python3 Scripts/test-ota.py
             cargo fmt --all --check
             cargo build --locked --bins
             cargo test --locked
@@ -97,6 +98,7 @@ jobs:
         run: |
           python3 Scripts/version.py
           python3 Scripts/test-ci-release.py
+          python3 Scripts/test-ota.py
           cargo fmt --all --check
           cargo build --locked --bins
           cargo test --locked

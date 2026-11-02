@@ -20,7 +20,7 @@
 <key>NSLocalNetworkUsageDescription</key><string>Anywhere Host 需要连接你配置的局域网服务器和开发工具，以提供远程开发服务。</string>
 <key>NSAppleEventsUsageDescription</key><string>Anywhere Host 及你运行的开发工具需要在你允许后与 Xcode、终端等应用交互，以完成开发任务。</string>
 <key>SUFeedURL</key><string>https://github.com/Xingsandesu/AnywhereHost/releases/latest/download/appcast.xml</string>
-<key>SUPublicEDKey</key><string>gaVrksGoGpSM4lj9v0E7EVBG3z29k7jKUfmIw8QMOSU=</string>
+<key>SUPublicEDKey</key><string>/qwAlYZo1HZbFRNo6COLZ2cQO4Z+yDo77Rz6O6CivwM=</string>
 <key>SUEnableAutomaticChecks</key><true/>
 <key>SUAutomaticallyUpdate</key><false/>
 </dict></plist>

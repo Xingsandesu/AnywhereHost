@@ -14,11 +14,11 @@ runner 架构依据 [GitHub 官方 runner 列表](https://docs.github.com/en/act
 
 构建工作流使用只读仓库权限，不需要签名 secrets。Mac 通过显式 `Scripts/build-app.sh --unsigned` 生成未进行分发签名、未公证的 CI 包；`verify-app.py --unsigned` 只验证结构、arm64 可执行文件、版本和可选 Host 协议，不宣称签名或 Hardened Runtime 验证成功。此包供构建检查及后续签名使用，不能视为已签名安装包。默认 `build-app.sh` 和 `verify-app.py` 仍要求真实签名身份与原有安全检查。
 
-Linux CI 包可手动安装，但没有用于 OTA 的 `.deb.sig`。构建工作流本身不创建 GitHub Release；主分支构建成功后，由独立的签名工作流发布预发布版本。正式 Release 与 OTA 继续使用维护者签名流程。
+原始 Linux CI 包没有用于 OTA 的 `.deb.sig`。主分支构建成功后，独立工作流自动发布预发布版本；正式发布模式还会签署两个 Debian 包并生成 Sparkle 更新清单。
 
-## GitHub 签名、公证与预发布
+## GitHub 签名、公证与 OTA 发布
 
-[Sign and release packages](../.github/workflows/release.yml) 在主分支 `Build packages` 成功后自动运行。也可在 Actions 手动选择这个工作流，从 `main` 运行并填写 `build_run_id`，复用一个成功的主分支构建。原始构建 artifacts 必须尚未过期。
+[Sign and release packages](../.github/workflows/release.yml) 在主分支 `Build packages` 成功后自动运行。也可在 Actions 手动选择这个工作流，从 `main` 运行并填写 `build_run_id`，复用一个成功的主分支构建。默认发布预发布版本；勾选 `stable` 后发布正式 `v<版本>` 并设为 GitHub Latest。正式版要求所选构建就是当前 main 提交、版本号和 Mac 构建号都高于已发布正式版。原始构建 artifacts 必须尚未过期。
 
 工作流先通过 GitHub API 确认构建属于本仓库、使用指定构建工作流、来自 `main` 的 push 或手动执行、已全部成功且提交仍在主分支历史中。PR、fork 和其他分支的包不会进入签名任务。签名和发布使用的脚本来自工作流启动时的主分支提交。
 
@@ -31,6 +31,7 @@ Linux CI 包可手动安装，但没有用于 OTA 的 `.deb.sig`。构建工作�
 | `APPLE_TEAM_ID` | 证书所属 Apple Team ID |
 | `APPLE_ID` | 公证使用的开发者账户登录邮箱 |
 | `APPLE_APP_SPECIFIC_PASSWORD` | 该账户的 App 专用密码，不是账户登录密码 |
+| `SPARKLE_PRIVATE_KEY` | Base64 编码的 32 字节 Ed25519 种子，同时用于 Sparkle 和 Linux OTA |
 
 Mac runner 校验原构建包的 SHA256 后，使用临时钥匙串导入身份，确保唯一的有效 Developer ID Application 身份与 Team ID 一致。签名逻辑复用 `Scripts/sign-app.sh`，为 Sparkle 内嵌代码、框架、辅助进程和 App 启用 Hardened Runtime 与安全时间戳。Apple Developer ID 公共中间证书从 Apple 下载并校验固定 SHA256，不修改系统信任设置。
 
@@ -38,11 +39,19 @@ Mac runner 校验原构建包的 SHA256 后，使用临时钥匙串导入身份�
 
 发布任务不接触 Apple 凭据，只下载公证后的 Mac artifact 与原构建中的两个 Linux 包，校验哈希、架构及版本一致性，创建 `v<版本>-signed.<构建提交前12位>` 草稿。上传后的服务端 SHA256 与本地一致才公开发布，并重新匿名下载验证。已存在的同名 Release 不会被覆盖；重跑已发布构建会拒绝再次创建。发布中途失败留下的草稿需要检查后处理。
 
-这些版本是供手动安装的 **prerelease**，不改变 `latest`，不生成 Sparkle appcast 或 Linux OTA 签名。Apple 公证不会替代 Sparkle 的 Ed25519 更新签名。正式 OTA 的现有私钥继续留在维护者 Mac，不自动生成或轮换。
+默认自动运行仍是 **prerelease**，不改变 `latest`。正式发布模式在 Mac runner 上使用固定版本 Sparkle 的 `generate_appcast` 生成新版本的 `appcast.xml`，并为两个 Debian 包生成 `.deb.sig`。私钥只写入权限受限的临时目录，结束时删除；派生公钥必须匹配 App 与 Linux 包内置公钥。Mac ZIP 使用 OpenSSL 和 CryptoKit 分别验证签名，Debian 包使用原更新器的验证逻辑复验。发布任务仅持有公钥，并再次验证所有签名、清单 URL、版本、包内置公钥和公开下载；缺失或不匹配的 OTA 签名会阻止正式发布。
 
 本地 Linux 可以验证构建来源过滤、artifact 哈希与清单检查、工作流语法；实际 Developer ID 签名、公证和 Gatekeeper 验证以 GitHub Mac runner 的运行结果为准。
 
 Linux Debian 13 amd64 / arm64 的 deb 构建、安装和验证见 [Linux 指南](LINUX.md)。以下内容仅适用于 macOS。
+
+## 0.1.5 OTA 起点
+
+0.1.5 使用 macOS 构建号 8、Debian 包版本 0.1.5-1，采用新的 Ed25519 更新身份。对应私钥保存在仓库 Actions Secret `SPARKLE_PRIVATE_KEY`，公钥同步在 `Resources/Info.plist` 和 `Linux/packaging/update-public-key.pem`。后续版本沿用这把密钥，不在每次发布时生成新密钥。
+
+旧版本需要手动安装一次 0.1.5；从 0.1.5 起可通过应用内 OTA 升级到后续正式版。Sparkle 清单固定设置 `minimumUpdateVersion=8`，不向持有旧公钥的 Mac 版本投递新身份的更新。Linux 旧版同样需要手动跨过这个更新身份边界。新清单仅引用新发行版，不复制历史 0.1.4 清单。
+
+正式版附带 Mac ZIP、两个 Debian 包、`appcast.xml`、两个 `.deb.sig` 和覆盖全部六个文件的 `SHA256SUMS`。签名验证和更新发现可以在隔离测试中验证；真实桌面替换安装的验收需在测试机完成，不覆盖正在运行的用户环境。
 
 # macOS 构建、GitHub Release 与 OTA
 
@@ -63,7 +72,7 @@ python3 Scripts/verify-app.py dist/AnywhereHost.app --integration
 ## 版本
 
 ```sh
-python3 Scripts/version.py --set 0.1.5 --build 8
+python3 Scripts/version.py --set 0.1.6 --build 9
 cargo check
 ```
 
@@ -77,18 +86,18 @@ cargo check
 
 App 自动检查更新，也可在应用菜单点击“检查更新…”。用户选择安装后，Sparkle 验证签名、替换 App 并重新启动。App 的正常退出负责停止后端和 frpc；用户数据位于 Application Support，不包含在更新包中。隧道启动意图记录在 `tunnel-resume.json`：启动后正常退出会保留，显式“停止”会清除；下次启动自动恢复。旧版本迁入后需启动隧道一次来保存此状态。
 
-公钥提交在 Info.plist；私钥仅保存在维护者登录 Keychain，account 为 `com.jintongshu.AnywhereHost`。已有私钥不能随意重建，否则已安装版本无法验证新包。应按 Sparkle 官方流程备份和轮换密钥。
+公钥随 App 和 Debian 包发布，当前私钥保存在 GitHub Actions Secret `SPARKLE_PRIVATE_KEY`。0.1.5 后的发布必须沿用此身份；签名前派生公钥核对，禁止自动重建或轮换。历史本地 Keychain 中 `com.jintongshu.AnywhereHost` 账户的旧密钥不适用于当前更新身份。
 
-旧版 0.1.3 没有 Sparkle，首次需要手动安装 0.1.4。此后通过应用内 OTA 更新。GitHub Release 中 ZIP、appcast 和 SHA256SUMS 作为同一个版本发布，latest 自动指向最新正式 Release。
+旧版本需手动升级到新的 0.1.5 OTA 起点。此后正式版通过同一 GitHub Latest 地址提供新版本清单、ZIP 和签名；Linux 从同一个正式 Release 发现对应架构的 `.deb` 与 `.deb.sig`。
 
 ## 发布
 
-先完成测试、更新 `Docs/Releases/<version>.md`、构建并验证 App，再提交所有源码。推送只针对这个 Host 仓库，不涉及客户端。
+先递增版本和构建号、更新 `Docs/Releases/<version>.md`，提交并合并到 main，等待三个平台的 `Build packages` 全部通过。然后运行：
 
 ```sh
-./Scripts/release.sh --publish
+gh workflow run release.yml --ref main -f build_run_id=<成功构建ID> -f stable=true
 ```
 
-脚本校验版本与签名公钥，生成 ZIP 和 appcast，用 CryptoKit 独立校验 Ed25519 签名，然后推送 `main` 和 `v<version>` tag 并创建 GitHub Release。不带参数仅生成产物，不发布；产物目录已存在时会拒绝覆盖。
+工作流完成 Developer ID 签名、公证和 OTA 签名后，创建正式版本草稿；全部资源的服务端 SHA256 验证成功才公开并设为 Latest，再匿名下载并复验签名。普通每次 main 提交仍自动产生预发布包，正式 OTA 版本通过以上显式发布入口递增版本后发布。
 
-发布后应从公开 URL 重新下载，验证哈希和 appcast 签名，并在旧版本上完成一次真实 OTA 升级验收。此处的正式 OTA 发布流程在维护者 Mac 上执行；GitHub 自动预发布仅使用 Apple 签名与公证凭据，不持有 Sparkle OTA 私钥。
+`Scripts/release.sh` 保留作为维护者 Mac 的备用本地 Sparkle 流程，要求本地已导入匹配当前公钥的更新私钥；它不负责完整 Linux 多平台发布。推荐使用 GitHub 正式发布工作流。

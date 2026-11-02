@@ -23,7 +23,7 @@ Linux 没有 macOS 的 TCC“完全磁盘访问”授权位。文件和自动化
 ## 安装与使用
 
 ```sh
-sudo apt install ./anywhere-host_0.1.4-3_amd64.deb
+sudo apt install ./anywhere-host_0.1.5-1_amd64.deb
 anywhere-host-gtk
 ```
 
