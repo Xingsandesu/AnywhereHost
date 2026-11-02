@@ -1,5 +1,17 @@
 # Verification
 
+## Debian 13 amd64 (2026-11-02)
+
+- 47 Rust tests, strict Clippy and formatting checks passed; 72 isolated Host protocol checks passed.
+- 10 Python management/update tests passed, including certificate pinning, signed pairing/revocation, external-process ownership, cancelled permission checks and update signature rejection.
+- GTK smoke passed: eight management pages, setup gating/persistence, pairing/clipboard, permissions, background close/reopen, tray menu and explicit shutdown.
+- Real TigerVNC in isolated Xvfb passed framebuffer, keyboard/pointer, independent authentication, private socket, signed WSS, two-session limit and disabling checks. Five real frpc/frps cases passed.
+- The deb passed extracted-package checks and installation in a disposable Debian 13 container. The privileged updater rejected invalid signatures and installed a newer fixture-signed package in that container; no production signing key was used.
+- An isolated headless GNOME Wayland session completed the real portal consent flow, independent VNC authentication and framebuffer transfer. Wayland keyboard/pointer acceptance remains for manual testing. An additional nested GNOME-on-Xvfb experiment crashed the nested compositor; it did not exercise the user's desktop.
+- The live Codex smoke was rerun with shared-process thread/resume removed from the default read-only path. No inference was requested.
+
+The Debian package is an unsigned development artifact. Production OTA needs a release signed with the existing Host identity. Physical-session portal persistence, real-device WAN use and full accessibility acceptance remain manual checks. Swift is unavailable on this Linux host, so the macOS build was not verified here.
+
 ## Source checks
 
 ```sh

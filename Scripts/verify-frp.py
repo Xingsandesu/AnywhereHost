@@ -13,7 +13,8 @@ import tempfile
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-ARCH = {'arm64': 'arm64', 'x86_64': 'amd64'}[platform.machine()]
+ARCH = {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'amd64'}[platform.machine()]
+SYSTEM = platform.system().lower()
 TOKEN = 'local-fixture-token'
 
 
@@ -31,8 +32,8 @@ with tempfile.TemporaryDirectory(prefix='anywhere-frp-') as temporary:
         'codexBinary': str(ROOT / 'Scripts/fake-codex.py'),
         'frpcBinary': str(ROOT / 'Resources/frpc'),
     }))
-    with tarfile.open(ROOT / f'.build/frp_0.71.1_darwin_{ARCH}.tar.gz') as archive:
-        (directory / 'frps').write_bytes(archive.extractfile(f'frp_0.71.1_darwin_{ARCH}/frps').read())
+    with tarfile.open(ROOT / f'.build/frp_0.71.1_{SYSTEM}_{ARCH}.tar.gz') as archive:
+        (directory / 'frps').write_bytes(archive.extractfile(f'frp_0.71.1_{SYSTEM}_{ARCH}/frps').read())
         (directory / 'frps').chmod(0o755)
     logs = [(directory / 'host.log').open('w'), (directory / 'server.log').open('w')]
     host = subprocess.Popen([str(ROOT / 'target/debug/anywhere-host'), '--state-dir', temporary], stdout=logs[0], stderr=logs[0])

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AnywhereHost
+Comment=Manage your remote Codex host service
+Comment[zh_CN]=管理远程 Codex 主机服务
+Exec=anywhere-host-gtk
+Icon=com.jintongshu.AnywhereHost
+Terminal=false
+Categories=Development;Network;
+StartupNotify=true
+StartupWMClass=com.jintongshu.AnywhereHost

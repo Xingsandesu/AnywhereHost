@@ -2,14 +2,14 @@
 
 ## Product architecture
 
-AnywhereHost is a self-hosted backend for Host-compatible clients across devices. Its macOS app manages the host service; Codex interaction belongs to clients. The protocol exposes Codex operations, structured workspace resources, and live execution state.
+AnywhereHost is a self-hosted backend for Host-compatible clients across devices. Its macOS and Linux applications manage the host service; Codex interaction belongs to clients. The protocol exposes Codex operations, structured workspace resources, and live execution state.
 
-The macOS deliverable is one application bundle containing a SwiftUI executable, a Rust service, and pinned upstream frpc. The user's installed Codex provides the external runtime.
+The macOS deliverable is one application bundle containing a SwiftUI executable, a Rust service, and pinned upstream frpc. The Linux deliverable is a Debian 13 amd64 package containing a GTK 4/PyGObject console, the same Rust service and pinned Linux frpc. The user's installed Codex provides the external runtime.
 
 ## Components
 
 ```text
-SwiftUI host management / Host security v2 clients
+SwiftUI / GTK host management / Host security v2 clients
        │ HTTPS JSON + WSS events, device signatures + certificate pin
        ▼
 Rust Host: capability gate / request correlation / event journal
@@ -66,6 +66,10 @@ grant. Host checks do not establish permissions for a shared Codex process or ex
 tool. Required directories are rechecked at startup after setup completion. Checks cover
 Host data, the actual Codex Home and an explicitly selected directory; the Mac app
 does not enumerate Codex projects.
+
+## Linux interface
+
+See [Debian 13 / GTK](LINUX.md). The console manages service lifecycle, signed/pinned management requests, pairing and device revocation, frp, runtime paths, directory access checks and logs. Network and process waits run outside the GTK thread. It uses XDG state paths and preserves the installed Codex Home. Closing the GTK window keeps the service running; the application menu and StatusNotifierItem provide explicit quit. The three-step setup and permission checks gate completion on actual directory access and Codex connectivity. Signed deb updates use the existing Ed25519 release identity and a Polkit installer that re-verifies a root-owned copy. Wayland/X11 sharing uses pinned TigerVNC helpers supervised by Rust over a private Unix socket, with portal consent and independent VNC authentication. Capabilities reflect the installed helper and active desktop session. No systemd or launch-at-login service is installed.
 
 ## Implemented surface and limits
 

@@ -1,0 +1,17 @@
+AnywhereHost sources: https://github.com/Xingsandesu/AnywhereHost
+Authors: AnywhereHost contributors
+The repository does not currently declare a project-wide license; this package
+adds no license grant for AnywhereHost itself.
+
+Bundled frpc: https://github.com/fatedier/frp (v0.71.1)
+Copyright (c) 2016 fatedier
+License: Apache-2.0; see the accompanying frp-LICENSE.
+
+Codex is not included. GTK, PyGObject and Python dependencies are supplied by
+Debian and retain their respective licenses under /usr/share/doc.
+
+Bundled TigerVNC w0vncserver, x0vncserver and vncpasswd 1.16.2:
+https://github.com/TigerVNC/tigervnc
+License: GPL-2.0-or-later; see TigerVNC-LICENSE. The complete unmodified
+corresponding source archive is included as tigervnc-source.tar.gz, with the
+build instructions in build-linux-desktop.py. Helpers are separate processes.

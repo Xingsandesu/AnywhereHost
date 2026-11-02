@@ -1,3 +1,5 @@
+Linux Debian 13 amd64 的 deb 构建、安装和验证见 [Linux 指南](LINUX.md)。以下内容仅适用于 macOS。
+
 # macOS 构建、GitHub Release 与 OTA
 
 Host 独立分发，不通过 Mac App Store 或 TestFlight。Bundle ID 为 `com.jintongshu.AnywhereHost`，目标 Apple Silicon / macOS 14+。

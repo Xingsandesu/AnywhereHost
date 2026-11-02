@@ -9,6 +9,25 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Keep platform defaults in sync with Linux/anywhere_host/paths.py.
+pub fn default_state_dir() -> PathBuf {
+    state_dir(
+        env::var_os("HOME").map(PathBuf::from).as_deref(),
+        env::var_os("XDG_STATE_HOME").map(PathBuf::from).as_deref(),
+    )
+}
+fn state_dir(home: Option<&Path>, xdg: Option<&Path>) -> PathBuf {
+    let home = home.expect("HOME is required");
+    if cfg!(target_os = "linux") {
+        xdg.filter(|p| p.is_absolute())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| home.join(".local/state"))
+            .join("AnywhereHost")
+    } else {
+        home.join("Library/Application Support/AnywhereHost")
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct Config {
@@ -133,6 +152,28 @@ pub fn prepare(dir: &Path) -> Result<(Config, String, String)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn platform_state_paths_do_not_embed_a_user_home() {
+        use std::path::Path;
+        let home = Some(Path::new("/example/home"));
+        if cfg!(target_os = "linux") {
+            assert_eq!(
+                super::state_dir(home, Some(Path::new("/custom/state"))),
+                Path::new("/custom/state/AnywhereHost")
+            );
+            for xdg in [None, Some(Path::new("relative")), Some(Path::new(""))] {
+                assert_eq!(
+                    super::state_dir(home, xdg),
+                    Path::new("/example/home/.local/state/AnywhereHost")
+                );
+            }
+        } else {
+            assert_eq!(
+                super::state_dir(home, None),
+                Path::new("/example/home/Library/Application Support/AnywhereHost")
+            );
+        }
+    }
     #[test]
     fn removes_legacy_secret_without_rotating_v2_identity() {
         let directory = tempfile::tempdir().unwrap();

@@ -39,10 +39,7 @@ async fn main() -> Result<()> {
         .windows(2)
         .find(|a| a[0] == "--state-dir")
         .map(|a| PathBuf::from(&a[1]))
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").expect("HOME"))
-                .join("Library/Application Support/AnywhereHost")
-        });
+        .unwrap_or_else(config::default_state_dir);
     std::fs::create_dir_all(&dir)?;
     use std::os::unix::fs::OpenOptionsExt;
     let instance_lock = std::fs::OpenOptions::new()
@@ -115,11 +112,19 @@ async fn main() -> Result<()> {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("SIGTERM handler");
         tokio::select! {_=tokio::signal::ctrl_c()=>{},_=term.recv()=>{}}
+        stop_state.desktop.shutdown().await;
         let _ = stop_state.tunnel.shutdown().await;
         if let Some(c) = stop_state.codex.read().await.as_ref() {
             c.stop().await;
         }
         stop_handle.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
+    });
+    let desktop_state = state.clone();
+    tokio::spawn(async move {
+        loop {
+            desktop_state.desktop.maintain().await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
     });
     let tunnel_state = state.clone();
     tokio::spawn(async move {
