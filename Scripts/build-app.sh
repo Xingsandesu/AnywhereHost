@@ -30,19 +30,5 @@ if [[ "$UNSIGNED" == true ]]; then
   printf 'Built unsigned CI bundle %s (not signed for distribution or OTA)\n' "$APP"
   exit 0
 fi
-# Sparkle contains nested code. Sign from the inside out, preserving its XPC
-# entitlements. The distributed framework's original team cannot load into an
-# ad-hoc Hardened Runtime app, so use the same identity for all bundled code.
-FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
-if [[ -d "$FRAMEWORK" ]]; then
-  while IFS= read -r -d '' component; do
-    codesign --force --options runtime --preserve-metadata=entitlements --sign "${ANYWHERE_SIGNING_IDENTITY}" "$component"
-  done < <(find "$FRAMEWORK/Versions/B" -depth \( -name '*.xpc' -o -name '*.app' -o -name Autoupdate \) -print0)
-  codesign --force --options runtime --sign "${ANYWHERE_SIGNING_IDENTITY}" "$FRAMEWORK"
-fi
-for binary in anywhere-host anywhere-permission-probe frpc; do
-  codesign --force --options runtime --sign "${ANYWHERE_SIGNING_IDENTITY}" "$APP/Contents/MacOS/$binary"
-done
-codesign --force --options runtime --entitlements "$ROOT/Resources/AnywhereHost.entitlements" --sign "${ANYWHERE_SIGNING_IDENTITY}" "$APP"
-python3 Scripts/verify-app.py "$APP"
+ANYWHERE_SIGNING_IDENTITY="$ANYWHERE_SIGNING_IDENTITY" bash "$ROOT/Scripts/sign-app.sh" "$APP"
 printf 'Built %s\n' "$APP"
