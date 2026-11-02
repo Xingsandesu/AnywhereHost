@@ -46,6 +46,7 @@ jobs:
           chown -R builder:builder "$GITHUB_WORKSPACE" /opt/cargo /opt/rustup
           runuser -u builder -- env PATH="/opt/cargo/bin:$PATH" bash -e -o pipefail -c '
             python3 Scripts/version.py
+            python3 Scripts/test-ci-release.py
             cargo fmt --all --check
             cargo build --locked --bins
             cargo test --locked
@@ -95,6 +96,7 @@ jobs:
       - name: Validate Rust and Swift sources
         run: |
           python3 Scripts/version.py
+          python3 Scripts/test-ci-release.py
           cargo fmt --all --check
           cargo build --locked --bins
           cargo test --locked
