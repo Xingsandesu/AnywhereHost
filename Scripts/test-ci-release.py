@@ -48,6 +48,26 @@ class SourceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     release.validate_run(run, self.repo)
 
+    def test_stable_release_requires_current_main_and_workflow_commit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = pathlib.Path(temporary) / 'output'
+            for comparison, workflow_sha, accepted in (
+                ('identical', 'a' * 40, True),
+                ('ahead', 'a' * 40, False),
+                ('identical', 'b' * 40, False),
+            ):
+                with self.subTest(comparison=comparison, workflow_sha=workflow_sha), \
+                        patch.dict(os.environ, GITHUB_REF='refs/heads/main', GITHUB_REPOSITORY=self.repo,
+                                   GITHUB_SHA=workflow_sha, GITHUB_OUTPUT=str(output)), \
+                        patch.object(release, 'gh_api', side_effect=[self.run, {'status': comparison}]), \
+                        patch('sys.stdout', new_callable=io.StringIO):
+                    if accepted:
+                        release.source('123', stable=True)
+                        self.assertIn('sha=' + 'a' * 40, output.read_text())
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'current main commit'):
+                            release.source('123', stable=True)
+
 
 class PackageTests(unittest.TestCase):
     def setUp(self):

@@ -11,6 +11,11 @@ on:
         description: Successful main Build packages run ID
         required: true
         type: string
+      stable:
+        description: Publish a new stable version with verified Mac and Linux OTA signatures
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -40,7 +45,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id }}
-        run: python3 Scripts/ci-release.py source "$BUILD_RUN_ID"
+          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+        run: |
+          flags=()
+          if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi
+          python3 Scripts/ci-release.py source "$BUILD_RUN_ID" "${flags[@]}"
 
   macos:
     needs: source
@@ -81,6 +90,41 @@ jobs:
           python3 Scripts/verify-app.py work/AnywhereHost.app --integration
           cd output
           shasum -a 256 ./*.zip > SHA256SUMS
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: inputs.stable == true
+        with:
+          name: anywhere-host-linux-amd64-${{ needs.source.outputs.sha }}
+          path: ota-input/amd64
+          run-id: ${{ needs.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: inputs.stable == true
+        with:
+          name: anywhere-host-linux-arm64-${{ needs.source.outputs.sha }}
+          path: ota-input/arm64
+          run-id: ${{ needs.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Prepare pinned Sparkle and OpenSSL tools
+        if: inputs.stable == true
+        run: |
+          swift package resolve
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Sign and verify all OTA packages
+        if: inputs.stable == true
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          archive=$(python3 Scripts/ci-release.py package output notarized)
+          amd64=$(python3 Scripts/ci-release.py package ota-input/amd64 amd64)
+          arm64=$(python3 Scripts/ci-release.py package ota-input/arm64 arm64)
+          python3 Scripts/ota.py sign "$archive" "$amd64" "$arm64" ota-output
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: inputs.stable == true
+        with:
+          name: anywhere-host-ota-${{ needs.source.outputs.sha }}
+          path: ota-output/
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: anywhere-host-macos-arm64-notarized-${{ needs.source.outputs.sha }}
@@ -91,7 +135,7 @@ jobs:
       - name: Remove temporary signing and notarization keychains
         if: always()
         run: |
-          for directory in "$RUNNER_TEMP"/anywhere-sign.* "$RUNNER_TEMP"/anywhere-notary.*; do
+          for directory in "$RUNNER_TEMP"/anywhere-sign.* "$RUNNER_TEMP"/anywhere-notary.* "$RUNNER_TEMP"/anywhere-ota-sign-*; do
             [[ -d "$directory" ]] || continue
             for keychain in "$directory"/*.keychain-db; do
               security delete-keychain "$keychain" >/dev/null 2>&1 || true
@@ -126,15 +170,28 @@ jobs:
           path: artifacts/arm64
           run-id: ${{ needs.source.outputs.run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: inputs.stable == true
+        with:
+          name: anywhere-host-ota-${{ needs.source.outputs.sha }}
+          path: artifacts/ota
       - name: Check all package hashes, architectures and versions
         id: packages
         env:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
           BUILD_RUN_ID: ${{ needs.source.outputs.run_id }}
-        run: python3 Scripts/ci-release.py assemble artifacts release "$SOURCE_SHA" "$BUILD_RUN_ID"
-      - name: Publish immutable prerelease and verify public downloads
+          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+        run: |
+          flags=()
+          if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi
+          python3 Scripts/ci-release.py assemble artifacts release "$SOURCE_SHA" "$BUILD_RUN_ID" "${flags[@]}"
+      - name: Publish release and verify public downloads
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
           RELEASE_TAG: ${{ steps.packages.outputs.tag }}
-        run: python3 Scripts/ci-release.py publish release "$RELEASE_TAG" "$SOURCE_SHA"
+          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+        run: |
+          flags=()
+          if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi
+          python3 Scripts/ci-release.py publish release "$RELEASE_TAG" "$SOURCE_SHA" "${flags[@]}"

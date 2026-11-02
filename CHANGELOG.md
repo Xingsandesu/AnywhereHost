@@ -1,14 +1,18 @@
 # 更新记录
 
-## Unreleased — Debian 13
+## 0.1.5 (8)
 
-- Debian 13 amd64 deb：GTK 4 管理界面，复用 Rust Host 与已安装 Codex。
+- macOS arm64 发行包使用 Developer ID Application 签名、Apple 公证和装订票据，并验证 Gatekeeper。
+- GitHub Actions 原生构建 macOS arm64、Debian 13 amd64 / arm64；主分支成功后自动签名、公证并发布预发布包。
+- Debian 13 amd64 / arm64 deb：GTK 4 管理界面，复用 Rust Host 与已安装 Codex。
 - 补齐设置向导、权限检查、设备配对与撤销、隧道、后台驻留与状态菜单。
 - 加入 Wayland/X11 桌面共享 helper、门户授权、独立 VNC 认证和原有 WSS 桌面协议。
 - 加入自动/手动更新检查、Ed25519 签名验证、Polkit 安装和重启。
 - XDG 状态目录、构建路径映射、固定校验和依赖、完整桌面 helper 对应源码及 Debian CI。
 - 修复只读 Codex smoke 在共享模式下意外调用 thread/resume 的问题。
 - 修复多台 Host 共用 frps 时固定代理名冲突；根据 Host 公开证书身份生成稳定唯一名称，并兼容旧隧道配置。
+- 独立的桌面共享密码保存按钮支持 Host 离线和共享已开启时保存，直接反馈校验和写入错误。
+- 建立 0.1.5 新 OTA 更新身份：GitHub 正式发布时生成 Sparkle 清单和两个 Linux OTA 签名，发布前后独立验证；旧版本手动安装一次 0.1.5 后，后续版本可应用内升级。
 
 ## 0.1.4 (7)
 
