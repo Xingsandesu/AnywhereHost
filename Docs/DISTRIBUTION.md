@@ -1,4 +1,22 @@
-Linux Debian 13 amd64 的 deb 构建、安装和验证见 [Linux 指南](LINUX.md)。以下内容仅适用于 macOS。
+# GitHub 自动构建
+
+[Build packages 工作流](../.github/workflows/build.yml) 在所有分支和 tag 的每次 `push`、每次 PR 更新以及手动 `workflow_dispatch` 时构建该次提交。不配置路径过滤，也不因新 push 取消之前的构建。
+
+| 平台 | GitHub runner / 构建环境 | 下载产物 |
+| --- | --- | --- |
+| macOS arm64 | `macos-26`（Apple Silicon，Xcode 26 SDK） | `AnywhereHost-<版本>-macos-arm64-unsigned.zip`，内含完整 `.app` |
+| Linux amd64 | `ubuntu-24.04` / 原生 Debian 13 容器 | `anywhere-host_<版本>-<修订>_amd64.deb` |
+| Linux arm64 | `ubuntu-24.04-arm` / 原生 Debian 13 容器 | `anywhere-host_<版本>-<修订>_arm64.deb` |
+
+runner 架构依据 [GitHub 官方 runner 列表](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)，Linux 两种架构均在相应原生机器上编译和运行验证，不使用交叉编译或 QEMU。Linux 包针对 Debian 13 的依赖构建，不保证兼容其他发行版。
+
+在仓库 **Actions → Build packages → 对应运行 → Artifacts** 下载。每个平台的 artifact 名含提交 SHA，保存 30 天，包旁附 `SHA256SUMS`；解压 artifact 后可运行 `sha256sum --check SHA256SUMS`（Linux）或 `shasum -a 256 --check SHA256SUMS`（macOS）。上传前须通过该平台的源码检查与包验证，失败任务不会上传包。
+
+CI 使用只读仓库权限，不需要签名 secrets。Mac 通过显式 `Scripts/build-app.sh --unsigned` 生成未进行分发签名、未公证的 CI 包；`verify-app.py --unsigned` 只验证结构、arm64 可执行文件、版本和可选 Host 协议，不宣称签名或 Hardened Runtime 验证成功。此包供构建检查及后续签名使用，不能视为已签名安装包；正式分发仍需在 Mac 上走下面的签名流程。默认 `build-app.sh` 和 `verify-app.py` 仍要求真实签名身份与原有安全检查。
+
+Linux CI 包可手动安装，但没有用于 OTA 的 `.deb.sig`。工作流不创建 GitHub Release、不更新 `latest` / Sparkle appcast，避免把每次提交的 CI 包推送给正式用户。正式 Release 与 OTA 继续使用维护者签名流程。
+
+Linux Debian 13 amd64 / arm64 的 deb 构建、安装和验证见 [Linux 指南](LINUX.md)。以下内容仅适用于 macOS。
 
 # macOS 构建、GitHub Release 与 OTA
 
@@ -12,7 +30,7 @@ swift package resolve
 python3 Scripts/verify-app.py dist/AnywhereHost.app --integration
 ```
 
-构建脚本依次选择 Developer ID Application、Apple Development 身份，也可通过 `ANYWHERE_SIGNING_IDENTITY` 指定。Sparkle 与 App 必须有相同 Team ID 才能通过 Hardened Runtime 的 library validation；不再使用 ad-hoc 打包，也不关闭 library validation。脚本由内向外签署 Sparkle、辅助进程和 App，保留 XPC 权限，检查签名和打包结构。
+默认签名构建依次选择 Developer ID Application、Apple Development 身份，也可通过 `ANYWHERE_SIGNING_IDENTITY` 指定。Sparkle 与 App 必须有相同 Team ID 才能通过 Hardened Runtime 的 library validation；不使用 ad-hoc 分发签名，也不关闭 library validation。脚本由内向外签署 Sparkle、辅助进程和 App，保留 XPC 权限，检查签名和打包结构。
 
 当前维护者环境只有 Apple Development 证书，因此 0.1.4 是开发签名、未公证版本。Sparkle 更新包另有 Ed25519 签名，但这不能替代 Apple 公证或保证首次下载无 Gatekeeper 提示。正式 Developer ID 分发需取得相应证书，使用 `xcrun notarytool submit ... --wait` 后 `xcrun stapler staple`，再生成更新 ZIP。请勿提交证书私钥或公证凭证。
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a native Debian 13 amd64 package without root or user-specific paths."""
+"""Build a native Debian 13 amd64/arm64 package without root or user-specific paths."""
 import argparse
 import os
 from pathlib import Path
@@ -14,6 +14,7 @@ import tomllib
 import importlib.util
 
 ROOT = Path(__file__).resolve().parents[1]
+TARGETS = {'amd64': 'x86_64-unknown-linux-gnu', 'arm64': 'aarch64-unknown-linux-gnu'}
 
 
 def run(*args, **kwargs):
@@ -27,8 +28,8 @@ def main():
     args = parser.parse_args()
     release = platform.freedesktop_os_release()
     arch = subprocess.check_output(['dpkg', '--print-architecture'], text=True).strip()
-    if release.get('ID') != 'debian' or release.get('VERSION_ID') != '13' or arch != 'amd64':
-        parser.error('Initial packaging target is native Debian 13 amd64; other targets are not validated')
+    if release.get('ID') != 'debian' or release.get('VERSION_ID') != '13' or arch not in TARGETS:
+        parser.error('Packaging requires native Debian 13 amd64 or arm64')
     key = plistlib.loads((ROOT / 'Resources/Info.plist').read_bytes())['SUPublicEDKey']
     pem = (ROOT / 'Linux/packaging/update-public-key.pem').read_text().splitlines()
     if base64.b64decode(''.join(pem[1:-1])) != bytes.fromhex('302a300506032b6570032100') + base64.b64decode(key):
@@ -38,7 +39,7 @@ def main():
     if not revision.isascii() or not revision.isdigit() or int(revision) < 1:
         raise RuntimeError('Debian package revision must be a positive integer')
     package_version = f'{version}-{revision}'
-    target = 'x86_64-unknown-linux-gnu'
+    target = TARGETS[arch]
     # Explicit target avoids an ambient cargo configuration silently cross-compiling.
     flags = (os.environ['CARGO_ENCODED_RUSTFLAGS'].split('\x1f') if os.environ.get('CARGO_ENCODED_RUSTFLAGS')
              else shlex.split(os.environ.get('RUSTFLAGS', '')))
@@ -87,7 +88,7 @@ def main():
         shutil.move(lib / 'frp-LICENSE', stage / 'usr/share/doc/anywhere-host/frp-LICENSE')
         # Resolve actual ELF dependencies from the native Debian package database.
         (root / 'debian').mkdir(exist_ok=True)
-        (root / 'debian/control').write_text('Source: anywhere-host\n\nPackage: anywhere-host\nArchitecture: amd64\nDescription: Host service\n')
+        (root / 'debian/control').write_text(f'Source: anywhere-host\n\nPackage: anywhere-host\nArchitecture: {arch}\nDescription: Host service\n')
         result = subprocess.check_output(['dpkg-shlibdeps', '-O', '-e' + str(lib / 'anywhere-host'),
             '-e' + str(lib / 'anywhere-permission-probe'), *['-e' + str(lib / name) for name in ('w0vncserver', 'x0vncserver', 'vncpasswd')]], cwd=root, text=True)
         dependencies = next(line.removeprefix('shlibs:Depends=') for line in result.splitlines()

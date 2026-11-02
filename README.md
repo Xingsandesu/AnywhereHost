@@ -1,14 +1,16 @@
 # AnywhereHost
 
-把你的 Mac 或 Debian 主机变成随身可连接的 Codex 工作主机。macOS 使用 SwiftUI App；Debian 13 amd64 使用 GTK 4 界面与 deb 包。两者复用 Rust 服务和 frp 隧道，提供安全设备配对及项目与会话协议；远程桌面在 macOS 使用系统屏幕共享，在 Linux 使用 Wayland / X11 本机共享。
+把你的 Mac 或 Debian 主机变成随身可连接的 Codex 工作主机。macOS 使用 SwiftUI App；Debian 13 amd64 / arm64 使用 GTK 4 界面与 deb 包。两者复用 Rust 服务和 frp 隧道，提供安全设备配对及项目与会话协议；远程桌面在 macOS 使用系统屏幕共享，在 Linux 使用 Wayland / X11 本机共享。
 
 **配套原生 iPhone 客户端 Anywhere 正在上架中。** 本仓库仅公开 Host，客户端独立开发，不包含在此仓库中。
 
 [下载最新版](https://github.com/Xingsandesu/AnywhereHost/releases/latest) · [更新记录](CHANGELOG.md) · [构建与 OTA](Docs/DISTRIBUTION.md) · [安全设计](Docs/SECURITY-V2.md)
 
-## Linux（Debian 13 amd64）
+每次 push 和 PR 更新都会通过 [GitHub Actions](https://github.com/Xingsandesu/AnywhereHost/actions/workflows/build.yml) 构建 macOS arm64 ZIP、Linux amd64 / arm64 DEB，并附 SHA-256 校验文件。产物在对应运行的 Artifacts 下载，保留 30 天。Mac CI 包未进行分发签名或公证，Linux CI 包未签 OTA；正式发布与 CI 包的区别见 [自动构建说明](Docs/DISTRIBUTION.md#github-自动构建)。
 
-提供 GTK 管理界面、Rust 后端和固定校验和的 Linux frpc。源码构建：`python3 Scripts/build-deb.py`；安装：`sudo apt install ./dist/anywhere-host_0.1.4-2_amd64.deb`。从应用菜单或 `anywhere-host-gtk` 启动。依赖、权限、运行时配置与验证说明见 [Linux 指南](Docs/LINUX.md)。
+## Linux（Debian 13 amd64 / arm64）
+
+提供 GTK 管理界面、Rust 后端和固定校验和的 Linux frpc。源码构建：`python3 Scripts/build-deb.py`；安装：`sudo apt install ./dist/anywhere-host_0.1.4-3_amd64.deb`。从应用菜单或 `anywhere-host-gtk` 启动。依赖、权限、运行时配置与验证说明见 [Linux 指南](Docs/LINUX.md)。
 
 ## macOS 使用
 

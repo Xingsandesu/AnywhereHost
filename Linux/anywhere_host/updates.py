@@ -15,6 +15,13 @@ API = 'https://api.github.com/repos/Xingsandesu/AnywhereHost/releases/latest'
 MAX_PACKAGE = 256 * 1024 * 1024
 
 
+def native_architecture():
+    architecture = subprocess.check_output(['dpkg', '--print-architecture'], text=True, timeout=10).strip()
+    if architecture not in ('amd64', 'arm64'):
+        raise ValueError(f'不支持的 Debian 架构：{architecture}')
+    return architecture
+
+
 def public_key():
     bundled = Path(__file__).resolve().parent.parent / 'update-public-key.pem'
     return bundled if bundled.exists() else Path(__file__).resolve().parents[1] / 'packaging/update-public-key.pem'
@@ -84,10 +91,11 @@ class Updater:
             download(API, path, 2 * 1024 * 1024)
             release = json.loads(path.read_text())
         current = self.current_version()
+        architecture = native_architecture()
         assets = {asset['name']: asset for asset in release.get('assets', [])}
         self.candidate = None
         for name, asset in assets.items():
-            match = re.fullmatch(r'anywhere-host_(\d+\.\d+\.\d+-\d+)_amd64\.deb', name)
+            match = re.fullmatch(rf'anywhere-host_(\d+\.\d+\.\d+-\d+)_{architecture}\.deb', name)
             if not match or name + '.sig' not in assets:
                 continue
             for selected in (asset, assets[name + '.sig']):
@@ -98,7 +106,7 @@ class Updater:
                 self.candidate = {'version': match[1], 'name': name, 'url': asset['browser_download_url'],
                                   'signature': assets[name + '.sig']['browser_download_url']}
                 return f'发现新版本 {match[1]}（当前 {current}）'
-        return f'当前 {current}；尚无更新的已签名 Debian amd64 发行包'
+        return f'当前 {current}；尚无更新的已签名 Debian {architecture} 发行包'
 
     def fetch(self):
         if not self.candidate:
@@ -111,7 +119,7 @@ class Updater:
         download(self.candidate['signature'], signature, 1024)
         verify(package, signature)
         info = metadata(package)
-        if info != {'Package': 'anywhere-host', 'Version': self.candidate['version'], 'Architecture': 'amd64'}:
+        if info != {'Package': 'anywhere-host', 'Version': self.candidate['version'], 'Architecture': native_architecture()}:
             raise ValueError('更新包身份与发布信息不一致')
         self.downloaded = package
         return f"{info['Version']} 已下载并通过 Ed25519 验证"
@@ -155,7 +163,7 @@ def install_verified(package, signature):
         verify(safe_package, safe_signature)
         info = metadata(safe_package)
         installed = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'anywhere-host'], text=True).strip()
-        if info.get('Package') != 'anywhere-host' or info.get('Architecture') != 'amd64' or not newer(info.get('Version', ''), installed):
+        if info.get('Package') != 'anywhere-host' or info.get('Architecture') != native_architecture() or not newer(info.get('Version', ''), installed):
             raise ValueError('更新身份无效或版本不高于当前安装版本')
         subprocess.run(['/usr/bin/apt-get', 'install', '--yes', '--no-remove', str(safe_package)], check=True,
                        env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'DEBIAN_FRONTEND': 'noninteractive'})

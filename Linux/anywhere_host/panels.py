@@ -23,14 +23,21 @@ class ManagementPanels:
         page = self.page('远程桌面', '允许已配对设备访问本机桌面；仍需独立桌面密码。Wayland 屏幕与输入由系统授权。')
         self.desktop_status = text('正在检查桌面共享能力…')
         page.append(self.desktop_status)
-        self.desktop_password = self.field(page, '独立桌面密码（8 位 ASCII；已设置时留空）', secret=True)
+        self.desktop_password = self.field(page, '独立桌面密码（恰好 8 位半角字母、数字或符号）', secret=True)
+        self.desktop_password.connect('activate', lambda _: self.save_desktop_password())
+        self.desktop_password_save = self.button('保存密码', self.save_desktop_password, True)
+        page.append(self.desktop_password_save)
+        self.desktop_password_status = text('密码已保存；修改时输入新密码后点击“保存密码”。'
+            if self.service.has_desktop_password() else '尚未保存密码；请先输入密码并点击“保存密码”。')
+        page.append(self.desktop_password_status)
         row = Gtk.Box(spacing=10)
         self.desktop_enable = self.button('允许已配对设备连接', lambda: self.save_desktop(True), True)
         self.desktop_disable = self.button('关闭桌面共享', lambda: self.save_desktop(False))
         row.append(self.desktop_enable)
         row.append(self.desktop_disable)
         page.append(row)
-        page.append(self.button('授权并检查屏幕与输入', self.authorize_desktop))
+        self.desktop_authorize = self.button('授权并检查屏幕与输入', self.authorize_desktop)
+        page.append(self.desktop_authorize)
         self.desktop_authorization = text('尚未验证屏幕与输入授权')
         page.append(self.desktop_authorization)
         page.append(self.button('系统隐私设置', lambda: self.launch_settings('privacy')))
@@ -87,10 +94,22 @@ class ManagementPanels:
         except OSError as error:
             self.message.set_text(f'无法打开系统设置：{error}')
 
+    def save_desktop_password(self):
+        password = self.desktop_password.get_text()
+        def done(_):
+            self.desktop_password.set_text('')
+            self.desktop_password_status.set_text('密码已保存；新连接使用此密码。授权检查时请再次填写同一密码。')
+            self.message.set_text('桌面密码已保存')
+        self.work(lambda: self.service.save_desktop_password(password), done,
+                  failed=lambda error: self.desktop_password_status.set_text(f'密码未保存：{error}'))
+
     def save_desktop(self, enabled):
         password = self.desktop_password.get_text()
         def done(_):
             self.desktop_password.set_text('')
+            self.desktop_enabled = enabled
+            if enabled and password:
+                self.desktop_password_status.set_text('密码已保存；授权检查时请再次填写同一密码。')
             self.message.set_text('桌面共享已启用' if enabled else '桌面共享已关闭')
         self.work(lambda: self.service.set_desktop(enabled, password if enabled else ''), done)
 
@@ -100,7 +119,8 @@ class ManagementPanels:
         self.desktop_password.set_text('')
         self.desktop_authorization.set_text('请在本机系统弹窗中选择屏幕并允许键盘、鼠标控制…')
         self.work(lambda: authorize(self.service.directory, password, self.service.cancelled),
-                  self.desktop_authorization.set_text)
+                  self.desktop_authorization.set_text,
+                  failed=lambda error: self.desktop_authorization.set_text(f'授权检查失败：{error}'))
 
     def show_desktop(self, value):
         self.desktop_supported = value['supported']

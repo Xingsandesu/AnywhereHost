@@ -1,5 +1,13 @@
 # Verification
 
+## Multi-platform GitHub CI (2026-11-02)
+
+The `Build packages` workflow now defines native macOS arm64 and Debian 13 amd64 / arm64 jobs for push, pull request and manual runs. `actionlint 1.7.12`, shell syntax and Python compilation checks passed locally. The workflow has not yet been run on GitHub; its macOS and Linux arm64 build results remain unverified until that first run.
+
+On the local Debian 13 amd64 host, formatting, `cargo build --locked --bins`, 47 Rust tests, strict Clippy, 72 isolated Host protocol checks, 18 Python tests and six real frp fixture cases passed. Four new Python tests cover native release selection, missing signatures, foreign-architecture rejection at download/install and unsupported architectures. A fresh amd64 deb passed metadata and ELF architecture checks, extracted-package tests, GTK smoke and real TigerVNC framebuffer/input checks in isolated Xvfb. It was not installed over the running application.
+
+The pinned Linux arm64 frpc archive was downloaded, its upstream SHA-256 matched, and its ELF header identified AArch64; that binary was not executed on this amd64 host. `swift build` could not run because Swift is not installed. CI's explicit unsigned Mac mode does not establish code-signing, notarization, Hardened Runtime, GUI launch or OTA acceptance. No live Codex inference or existing user threads were used.
+
 ## Debian 13 amd64 (2026-11-02)
 
 - 47 Rust tests, strict Clippy and formatting checks passed; 72 isolated Host protocol checks passed.
@@ -13,6 +21,10 @@
 The Debian package is an unsigned development artifact. Production OTA needs a release signed with the existing Host identity. Physical-session portal persistence, real-device WAN use and full accessibility acceptance remain manual checks. Swift is unavailable on this Linux host, so the macOS build was not verified here.
 
 Debian revision `0.1.4-2` fixes the shared frps proxy-name collision. The real frp fixture now runs two Hosts simultaneously against one frps and verifies both pinned HTTPS endpoints, distinct names, stable names after restart and migration from the old fixed name. All six frp cases, 47 Rust tests, strict Clippy and 72 Host checks passed again.
+
+Debian revision `0.1.4-3` separates password saving from the sharing switch. Previously the only save path was the enable button, disabled when Host was offline, sharing unsupported or sharing already enabled. The dedicated save button works independently of those states and reports validation/save errors beside the password field. The original file writer succeeded in an isolated reproduction; the fix addresses the blocked UI save paths, not a reproduced file-generation failure.
+
+For this fix, 14 Python tests, 47 Rust tests, strict Clippy and 72 isolated Host checks passed. GTK on isolated Xvfb verified saving with Host stopped, invalid-input feedback and changing the password while sharing is enabled. Real TigerVNC on isolated Xvfb accepted the new password and rejected the old password without restarting the helper, then passed framebuffer, keyboard/pointer, signed WSS, session-limit and disabling checks. The generated `0.1.4-3` deb passed extracted-package verification including those Python, Host, GTK and real desktop checks; it was not installed over the running application. No user desktop input or existing Codex threads were changed. Wayland consent was not rerun for this fix; `swift build` could not run because Swift is not installed.
 
 ## Source checks
 

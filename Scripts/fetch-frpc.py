@@ -14,6 +14,7 @@ DIGESTS = {
     ('darwin', 'arm64'): 'd15d0324b99e14619c9aa46e37f6db588c06a09be4bc6f7948890b6b61077842',
     ('darwin', 'amd64'): '8acb59b6fb998cc8d209d1373d90bf70fa5ec3efeb4dfbc7bda6ce3abd78cb45',
     ('linux', 'amd64'): '1d9875210972a5d1a62b2dc4c48df45ab0af05d3ca1b5e494a014428259df803',
+    ('linux', 'arm64'): '8edf590b0c396fa42f9c147121a76af83cfc2002b08f5aef0ea1008c43482019',
 }
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output-dir', type=pathlib.Path, default=ROOT / 'Resources')
