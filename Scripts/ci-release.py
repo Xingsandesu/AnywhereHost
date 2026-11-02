@@ -210,6 +210,8 @@ def publish(directory, tag, sha, stable=False):
             ota.verify(public, public / archives[0].name, [public / path.name for path in debs], tag)
             if gh_api(f'repos/{repository}/releases/latest')['id'] != release_id:
                 raise ValueError('Published stable release is not GitHub Latest')
+            subprocess.run([sys.executable, str(ota.ROOT / 'Scripts/verify-linux-ota.py'),
+                            *(str(public / path.name) for path in debs)], check=True)
     print('Published and public downloads verified: ' + release['html_url'])
 
 

@@ -10,19 +10,19 @@
 
 ## Linux（Debian 13 amd64 / arm64）
 
-提供 GTK 管理界面、Rust 后端和固定校验和的 Linux frpc。源码构建：`python3 Scripts/build-deb.py`；安装：`sudo apt install ./dist/anywhere-host_0.1.5-1_amd64.deb`。arm64 使用对应架构的包。从应用菜单或 `anywhere-host-gtk` 启动。依赖、权限、运行时配置与验证说明见 [Linux 指南](Docs/LINUX.md)。
+提供 GTK 管理界面、Rust 后端和固定校验和的 Linux frpc。源码构建：`python3 Scripts/build-deb.py`；安装：`sudo apt install ./dist/anywhere-host_0.1.6-1_amd64.deb`。arm64 使用对应架构的包。从应用菜单或 `anywhere-host-gtk` 启动。依赖、权限、运行时配置与验证说明见 [Linux 指南](Docs/LINUX.md)。
 
 ## macOS 使用
 
 需要 Apple Silicon Mac、macOS 14+，以及已经登录的 Codex App 或 CLI。Host 使用本机已安装的 Codex，不分发 Codex。
 
-1. 下载 Release 中的 ZIP，解压并将 `AnywhereHost.app` 放入“应用程序”。0.1.5 使用 Developer ID Application 签名并通过 Apple 公证。
+1. 下载 Release 中的 ZIP，解压并将 `AnywhereHost.app` 放入“应用程序”。0.1.6 使用 Developer ID Application 签名并通过 Apple 公证。
 2. 启动 Host，完成设置向导。主界面和菜单栏显示版本号，应用菜单提供“检查更新…”。
 3. 在“连接设备”填写自有 frps 的地址、控制端口、映射端口和令牌。控制端口与映射端口须不同；默认转发本机 `127.0.0.1:9443` 的 HTTPS 服务。
 4. 使用客户端扫描二维码，完成一次性设备配对。配对票据五分钟有效，每个设备独立签名，Mac 可撤销设备。
 5. 使用远程桌面时，在 macOS 系统设置开启“屏幕共享”，再在 Host 中允许已配对设备连接。桌面复用原有 HTTPS/WSS 隧道，不需要暴露公网 5900 端口。
 
-**旧版本请手动安装一次 0.1.5，之后可通过应用内 OTA 升级。** 0.1.5 启用新的更新身份；GitHub 正式发布时自动生成 Sparkle 更新清单和 Linux OTA 签名，客户端使用内置公钥验证更新包。安装不会覆盖配对、证书或配置，但重启会中断当时的远程连接。已启动的隧道会在后续 App 重启后自动恢复；主动停止隧道则不会自动重启。
+**旧版本请手动安装一次 0.1.6，之后可通过应用内 OTA 升级。** 0.1.6 沿用已配置的新更新身份，并修复 Linux 更新检查；GitHub 正式发布时自动生成 Sparkle 更新清单和 Linux OTA 签名，客户端使用内置公钥验证更新包。安装不会覆盖配对、证书或配置，但重启会中断当时的远程连接。已启动的隧道会在后续 App 重启后自动恢复；主动停止隧道则不会自动重启。
 
 ## 功能与边界
 

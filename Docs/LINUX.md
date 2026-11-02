@@ -23,7 +23,7 @@ Linux 没有 macOS 的 TCC“完全磁盘访问”授权位。文件和自动化
 ## 安装与使用
 
 ```sh
-sudo apt install ./anywhere-host_0.1.5-1_amd64.deb
+sudo apt install ./anywhere-host_0.1.6-1_amd64.deb
 anywhere-host-gtk
 ```
 
@@ -60,7 +60,7 @@ Rust 根据运行会话选择打包的 `w0vncserver`（Wayland）或 `x0vncserve
 自动检查仅查询 Release，不自动下载或安装。发布方上传 `anywhere-host_<版本>-<修订>_<amd64或arm64>.deb` 与同名 `.deb.sig`；更新器按本机 Debian 架构选择包，下载验证和特权安装再次拒绝架构不匹配的包。签名使用与 macOS Host 相同的 Ed25519 公钥（来自 Info.plist）；没有合法签名的发行包不会显示成可安装更新。
 
 ```sh
-python3 Scripts/sign-deb.py dist/anywhere-host_0.1.5-1_amd64.deb --key /secure/path/host-ed25519.pem
+python3 Scripts/sign-deb.py dist/anywhere-host_0.1.6-1_amd64.deb --key /secure/path/host-ed25519.pem
 ```
 
 私钥不进入仓库、构建镜像或 deb。安装时用户通过 Polkit 授权；root helper 首先把输入复制到私有临时目录，再验证签名、包名、架构与版本，拒绝降级、符号链接或超大输入，然后由 APT 安装。用户状态保留。取消或失败会恢复原自有服务；成功后重新打开应用。也可手动安装新 deb。

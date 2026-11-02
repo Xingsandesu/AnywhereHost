@@ -19,7 +19,7 @@ class UpdateArchitecture(unittest.TestCase):
                 assets.append({'name': name + suffix, 'browser_download_url':
                                updates.REPOSITORY + '/releases/download/v0.1.5/' + name + suffix})
 
-        def download_release(url, path, limit):
+        def download_release(url, path, limit, **kwargs):
             path.write_text(json.dumps({'assets': assets}))
 
         for architecture in ('amd64', 'arm64'):

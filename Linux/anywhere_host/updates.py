@@ -60,8 +60,8 @@ class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(request, response, code, message, headers, url)
 
 
-def download(url, destination, limit):
-    request = urllib.request.Request(url, headers={'User-Agent': 'AnywhereHost-Linux', 'Accept': 'application/octet-stream'})
+def download(url, destination, limit, *, accept='application/octet-stream'):
+    request = urllib.request.Request(url, headers={'User-Agent': 'AnywhereHost-Linux', 'Accept': accept})
     opener = urllib.request.build_opener(HTTPSRedirect())
     with opener.open(request, timeout=30) as response, open(destination, 'wb') as output:
         count = 0
@@ -88,7 +88,7 @@ class Updater:
     def check(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'release.json'
-            download(API, path, 2 * 1024 * 1024)
+            download(API, path, 2 * 1024 * 1024, accept='application/vnd.github+json')
             release = json.loads(path.read_text())
         current = self.current_version()
         architecture = native_architecture()

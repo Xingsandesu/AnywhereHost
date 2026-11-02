@@ -45,13 +45,13 @@ Mac runner 校验原构建包的 SHA256 后，使用临时钥匙串导入身份�
 
 Linux Debian 13 amd64 / arm64 的 deb 构建、安装和验证见 [Linux 指南](LINUX.md)。以下内容仅适用于 macOS。
 
-## 0.1.5 OTA 起点
+## OTA 更新身份与首次安装
 
 0.1.5 使用 macOS 构建号 8、Debian 包版本 0.1.5-1，采用新的 Ed25519 更新身份。对应私钥保存在仓库 Actions Secret `SPARKLE_PRIVATE_KEY`，公钥同步在 `Resources/Info.plist` 和 `Linux/packaging/update-public-key.pem`。后续版本沿用这把密钥，不在每次发布时生成新密钥。
 
-旧版本需要手动安装一次 0.1.5；从 0.1.5 起可通过应用内 OTA 升级到后续正式版。Sparkle 清单固定设置 `minimumUpdateVersion=8`，不向持有旧公钥的 Mac 版本投递新身份的更新。Linux 旧版同样需要手动跨过这个更新身份边界。新清单仅引用新发行版，不复制历史 0.1.4 清单。
+首次安装请直接使用 0.1.6。Mac 0.1.5 使用同一更新身份，可 OTA 到 0.1.6；更早 Mac 版本需要手动安装。Linux 0.1.5 的更新检查有 HTTP 415 问题，0.1.6 已修复，因此 Linux 0.1.5 及更早版本需要手动安装一次 0.1.6；后续可应用内 OTA。Sparkle 清单固定设置 `minimumUpdateVersion=8`，不向持有旧公钥的 Mac 版本投递新身份的更新。Linux 旧版同样需要手动跨过这个更新身份边界。新清单仅引用新发行版，不复制历史 0.1.4 清单。
 
-正式版附带 Mac ZIP、两个 Debian 包、`appcast.xml`、两个 `.deb.sig` 和覆盖全部六个文件的 `SHA256SUMS`。签名验证和更新发现可以在隔离测试中验证；真实桌面替换安装的验收需在测试机完成，不覆盖正在运行的用户环境。
+正式版附带 Mac ZIP、两个 Debian 包、`appcast.xml`、两个 `.deb.sig` 和覆盖全部六个文件的 `SHA256SUMS`。签名验证和更新发现可以在隔离测试中验证；正式发布后还运行 `Scripts/verify-linux-ota.py`，从发布的 Debian 包提取真实更新器，在线验证更新发现、下载、签名及相同版本不重复更新；版本号和架构采用隔离测试值。真实桌面替换安装的验收需在测试机完成，不覆盖正在运行的用户环境。
 
 # macOS 构建、GitHub Release 与 OTA
 
@@ -72,7 +72,7 @@ python3 Scripts/verify-app.py dist/AnywhereHost.app --integration
 ## 版本
 
 ```sh
-python3 Scripts/version.py --set 0.1.6 --build 9
+python3 Scripts/version.py --set 0.1.7 --build 10
 cargo check
 ```
 
@@ -88,7 +88,7 @@ App 自动检查更新，也可在应用菜单点击“检查更新…”。用�
 
 公钥随 App 和 Debian 包发布，当前私钥保存在 GitHub Actions Secret `SPARKLE_PRIVATE_KEY`。0.1.5 后的发布必须沿用此身份；签名前派生公钥核对，禁止自动重建或轮换。历史本地 Keychain 中 `com.jintongshu.AnywhereHost` 账户的旧密钥不适用于当前更新身份。
 
-旧版本需手动升级到新的 0.1.5 OTA 起点。此后正式版通过同一 GitHub Latest 地址提供新版本清单、ZIP 和签名；Linux 从同一个正式 Release 发现对应架构的 `.deb` 与 `.deb.sig`。
+旧版安装要求见上面的首次安装说明；当前推荐直接安装 0.1.6。此后正式版通过同一 GitHub Latest 地址提供新版本清单、ZIP 和签名；Linux 从同一个正式 Release 发现对应架构的 `.deb` 与 `.deb.sig`。
 
 ## 发布
 
