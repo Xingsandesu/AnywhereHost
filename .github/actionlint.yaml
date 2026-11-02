@@ -1,0 +1,6 @@
+# GitHub's official Apple Silicon Xcode 27 image is newer than actionlint's
+# built-in runner list. This allows its label; the job is GitHub-hosted.
+# https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+self-hosted-runner:
+  labels:
+    - xcode-27

@@ -8,6 +8,8 @@ On the local Debian 13 amd64 host, formatting, `cargo build --locked --bins`, 47
 
 The pinned Linux arm64 frpc archive was downloaded, its upstream SHA-256 matched, and its ELF header identified AArch64; that binary was not executed on this amd64 host. `swift build` could not run because Swift is not installed. CI's explicit unsigned Mac mode does not establish code-signing, notarization, Hardened Runtime, GUI launch or OTA acceptance. No live Codex inference or existing user threads were used.
 
+GitHub run [41387043312](https://github.com/Xingsandesu/AnywhereHost/actions/runs/41387043312) for `eb1049b` subsequently passed all three native jobs and uploaded the macOS arm64 unsigned ZIP plus Debian 13 amd64 / arm64 DEBs, each with SHA256SUMS. Mac passed `swift build`, `swift test`, Rust checks, packaged Host integration, architecture/layout validation and real frp fixtures under Xcode 27.1. Both Linux runners passed extracted-package Python, GTK and isolated TigerVNC desktop checks. This verifies CI packaging and fixtures, not Apple signing/notarization or physical-device acceptance.
+
 ## Debian 13 amd64 (2026-11-02)
 
 - 47 Rust tests, strict Clippy and formatting checks passed; 72 isolated Host protocol checks passed.

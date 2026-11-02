@@ -80,13 +80,13 @@ cargo build --locked --bins
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 python3 Scripts/verify-host.py
-python3 -m unittest discover -s Linux/tests -v
-xvfb-run -a dbus-run-session -- python3 Scripts/verify-linux-ui.py
 python3 Scripts/fetch-frpc.py
 python3 Scripts/verify-frp.py
 python3 Scripts/build-deb.py
 xvfb-run -a dbus-run-session -- python3 Scripts/verify-deb.py dist/*.deb --ui --desktop
 ```
+
+`verify-deb.py` 会提取完整包并执行 Python 管理、更新、密码测试及所选 GTK / 桌面检查。密码测试需要包内真实的 `vncpasswd`，因此全新工作区须先打包；只有 `cargo build` 的目录不包含该工具。
 
 也可用 `build-deb.py --desktop-container` 在 Debian 容器中构建桌面 helper，无需给宿主安装 C++ 开发依赖。构建不需 root；包架构、ELF 依赖和 Cargo 版本自动读取，限定原生 Debian 13 amd64 / arm64。包验证检查六个 ELF 可执行文件的实际架构及包元数据，并运行提取后的服务与桌面 fixture。
 
