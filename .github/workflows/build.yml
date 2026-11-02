@@ -51,11 +51,11 @@ jobs:
             cargo test --locked
             cargo clippy --locked --all-targets -- -D warnings
             python3 Scripts/verify-host.py
-            python3 -m unittest discover -s Linux/tests -v
-            xvfb-run -a dbus-run-session -- python3 Scripts/verify-linux-ui.py
             python3 Scripts/fetch-frpc.py
             python3 Scripts/verify-frp.py
             python3 Scripts/build-deb.py
+            # Runs Python/GTK/desktop tests against the complete package,
+            # including vncpasswd, which is not supplied by cargo build.
             xvfb-run -a dbus-run-session -- python3 Scripts/verify-deb.py dist/*.deb --ui --desktop
             cd dist
             sha256sum ./*.deb > SHA256SUMS
@@ -74,7 +74,7 @@ jobs:
 
   macos:
     name: macOS arm64
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 60
     env:
       MACOSX_DEPLOYMENT_TARGET: '14.0'

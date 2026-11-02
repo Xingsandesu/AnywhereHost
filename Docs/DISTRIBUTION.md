@@ -4,7 +4,7 @@
 
 | 平台 | GitHub runner / 构建环境 | 下载产物 |
 | --- | --- | --- |
-| macOS arm64 | `macos-26`（Apple Silicon，Xcode 26 SDK） | `AnywhereHost-<版本>-macos-arm64-unsigned.zip`，内含完整 `.app` |
+| macOS arm64 | `xcode-27`（Apple Silicon，Xcode 27 SDK） | `AnywhereHost-<版本>-macos-arm64-unsigned.zip`，内含完整 `.app` |
 | Linux amd64 | `ubuntu-24.04` / 原生 Debian 13 容器 | `anywhere-host_<版本>-<修订>_amd64.deb` |
 | Linux arm64 | `ubuntu-24.04-arm` / 原生 Debian 13 容器 | `anywhere-host_<版本>-<修订>_arm64.deb` |
 

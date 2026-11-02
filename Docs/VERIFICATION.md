@@ -2,7 +2,7 @@
 
 ## Multi-platform GitHub CI (2026-11-02)
 
-The `Build packages` workflow now defines native macOS arm64 and Debian 13 amd64 / arm64 jobs for push, pull request and manual runs. `actionlint 1.7.12`, shell syntax and Python compilation checks passed locally. The workflow has not yet been run on GitHub; its macOS and Linux arm64 build results remain unverified until that first run.
+The `Build packages` workflow defines native macOS arm64 and Debian 13 amd64 / arm64 jobs for push, pull request and manual runs. `actionlint 1.7.12`, shell syntax and Python compilation checks passed locally. The first GitHub run passed Rust and Host protocol checks on all three targets, then exposed missing `vncpasswd` in source-only Linux tests and a Swift compiler crash in Xcode 26.6. Linux now runs the Python/GTK/desktop checks through the extracted complete package; Mac uses the project's Xcode 27 toolchain. Full package results are recorded by the corresponding Actions run.
 
 On the local Debian 13 amd64 host, formatting, `cargo build --locked --bins`, 47 Rust tests, strict Clippy, 72 isolated Host protocol checks, 18 Python tests and six real frp fixture cases passed. Four new Python tests cover native release selection, missing signatures, foreign-architecture rejection at download/install and unsupported architectures. A fresh amd64 deb passed metadata and ELF architecture checks, extracted-package tests, GTK smoke and real TigerVNC framebuffer/input checks in isolated Xvfb. It was not installed over the running application.
 
