@@ -1,0 +1,7 @@
+FROM debian:13
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake pkg-config ca-certificates libx11-dev libxext-dev \
+    libxdamage-dev libxfixes-dev libxrandr-dev libxtst-dev zlib1g-dev \
+    libpixman-1-dev libjpeg62-turbo-dev libpam0g-dev libgnutls28-dev \
+    libglib2.0-dev libpipewire-0.3-dev uuid-dev libwayland-dev libxkbcommon-dev \
+    && rm -rf /var/lib/apt/lists/*

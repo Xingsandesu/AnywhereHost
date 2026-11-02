@@ -1,0 +1,8 @@
+#!/usr/bin/python3 -I
+import sys
+sys.dont_write_bytecode = True
+sys.path.insert(0, '/usr/lib/anywhere-host')
+from anywhere_host.updates import install_verified
+if len(sys.argv) != 3:
+    raise SystemExit('Expected package and detached signature')
+install_verified(sys.argv[1], sys.argv[2])

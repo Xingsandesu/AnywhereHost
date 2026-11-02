@@ -43,8 +43,10 @@ with tempfile.TemporaryDirectory(prefix='anywhere-real-') as temp:
             thread = threads['data'][0]
             history = rpc('thread/turns/list', {'threadId': thread['id'], 'limit': 1, 'itemsView': 'full'})
             print('PASS thread/turns/list:', len(history['data']), 'turns')
-            deny = request('/v1/rpc', {'method': 'thread/resume', 'params': {'threadId': thread['id'], 'excludeTurns': True}})
             if not status['runtime']['sharesLiveProcess']:
+                # Only exercise the ownership rejection in a private process. A
+                # shared process would actually resume the user's existing thread.
+                deny = request('/v1/rpc', {'method': 'thread/resume', 'params': {'threadId': thread['id'], 'excludeTurns': True}})
                 assert deny['error']['code'] == -32009
                 print('PASS existing desktop thread mutation is blocked')
         models = rpc('model/list', {'limit': 100})

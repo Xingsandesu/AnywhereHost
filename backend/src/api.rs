@@ -90,7 +90,7 @@ async fn capabilities(State(s): State<Arc<AppState>>) -> Json<Value> {
         .filter(|m| c.as_ref().is_some_and(|c| c.runtime.methods.contains(**m)))
         .collect();
     Json(
-        json!({"protocolVersion":2,"images":{"projectRead":true,"maxBytes":12582912},"remoteDesktop":{"supported":true,"protocol":"rfb","transport":"native-wss"},"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"liveActivityPush":{"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c| c.environments()).unwrap_or_default()},"history":{"itemPagination":true,"defaultItemLimit":60,"maxItemLimit":100},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
+        json!({"protocolVersion":2,"images":{"projectRead":true,"maxBytes":12582912},"remoteDesktop":{"supported":s.desktop.supported(),"protocol":"rfb","transport":"native-wss"},"methods":methods,"events":{"replay":true,"retained":5000,"epoch":s.events.epoch,"textDeltaOffsets":"utf8"},"liveActivityPush":{"enabled":s.apns.is_some(),"environments":s.apns.as_ref().map(|c| c.environments()).unwrap_or_default()},"history":{"itemPagination":true,"defaultItemLimit":60,"maxItemLimit":100},"approvals":true,"threadAccess":true,"tlsPinning":"sha256-leaf-certificate","sharedProcessControl":c.as_ref().is_some_and(|c|c.runtime.shares_live_process),"desktopAppAttachment":"unverified","foreignThreadMutation":"requires_shared_process"}),
     )
 }
 async fn activity_status(State(s): State<Arc<AppState>>) -> Json<Value> {

@@ -1,5 +1,15 @@
 # 更新记录
 
+## Unreleased — Debian 13
+
+- Debian 13 amd64 deb：GTK 4 管理界面，复用 Rust Host 与已安装 Codex。
+- 补齐设置向导、权限检查、设备配对与撤销、隧道、后台驻留与状态菜单。
+- 加入 Wayland/X11 桌面共享 helper、门户授权、独立 VNC 认证和原有 WSS 桌面协议。
+- 加入自动/手动更新检查、Ed25519 签名验证、Polkit 安装和重启。
+- XDG 状态目录、构建路径映射、固定校验和依赖、完整桌面 helper 对应源码及 Debian CI。
+- 修复只读 Codex smoke 在共享模式下意外调用 thread/resume 的问题。
+- 修复多台 Host 共用 frps 时固定代理名冲突；根据 Host 公开证书身份生成稳定唯一名称，并兼容旧隧道配置。
+
 ## 0.1.4 (7)
 
 - 主界面、菜单栏和系统“关于”显示版本号，Rust 版本与 App 同步。

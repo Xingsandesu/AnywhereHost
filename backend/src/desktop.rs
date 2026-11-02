@@ -15,12 +15,22 @@ use serde_json::json;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::Semaphore,
 };
 
+#[cfg(target_os = "linux")]
+mod linux;
+
+#[cfg(any(not(target_os = "linux"), test))]
+use tokio::net::TcpStream;
+
+pub trait DesktopIo: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> DesktopIo for T {}
+
 pub struct Desktop {
     path: PathBuf,
+    #[cfg(target_os = "linux")]
+    sharing: linux::Sharing,
     slots: Arc<Semaphore>,
     #[cfg(test)]
     target: Option<std::net::SocketAddr>,
@@ -33,11 +43,35 @@ struct Settings {
 impl Desktop {
     pub fn new(path: PathBuf) -> Self {
         Self {
+            #[cfg(target_os = "linux")]
+            sharing: linux::Sharing::new(
+                path.parent()
+                    .expect("desktop state directory")
+                    .to_path_buf(),
+            ),
             path,
             slots: Arc::new(Semaphore::new(2)),
             #[cfg(test)]
             target: None,
         }
+    }
+    pub fn supported(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self.sharing.supported()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            cfg!(target_os = "macos")
+        }
+    }
+    pub async fn maintain(&self) {
+        #[cfg(target_os = "linux")]
+        self.sharing.maintain(self.enabled().await).await;
+    }
+    pub async fn shutdown(&self) {
+        #[cfg(target_os = "linux")]
+        self.sharing.shutdown().await;
     }
     pub async fn enabled(&self) -> bool {
         let Ok(data) = tokio::fs::read(&self.path).await else {
@@ -47,23 +81,46 @@ impl Desktop {
     }
 }
 impl Desktop {
-    async fn connect(&self) -> std::io::Result<TcpStream> {
-        let target = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 5900));
+    async fn connect(&self) -> std::io::Result<Box<dyn DesktopIo>> {
         #[cfg(test)]
-        let target = self.target.unwrap_or(target);
-        let stream =
-            tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(target)).await??;
-        stream.set_nodelay(true)?;
-        Ok(stream)
+        if let Some(target) = self.target {
+            let stream = TcpStream::connect(target).await?;
+            stream.set_nodelay(true)?;
+            return Ok(Box::new(stream));
+        }
+        #[cfg(target_os = "linux")]
+        {
+            Ok(Box::new(
+                tokio::time::timeout(
+                    Duration::from_secs(3),
+                    tokio::net::UnixStream::connect(self.sharing.socket()),
+                )
+                .await??,
+            ))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let target = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 5900));
+            let stream =
+                tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(target)).await??;
+            stream.set_nodelay(true)?;
+            Ok(Box::new(stream))
+        }
     }
 }
+
 pub async fn status(State(s): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let supported = s.desktop.supported();
     let enabled = s.desktop.enabled().await;
+    #[cfg(target_os = "linux")]
+    let platform = s.desktop.sharing.status().await;
+    #[cfg(not(target_os = "linux"))]
+    let platform = json!({"helper":"macOS Screen Sharing"});
     // Do not create short-lived RFB viewers during an active session.
     let active = 2 - s.desktop.slots.available_permits();
-    let reachable = enabled && (active > 0 || s.desktop.connect().await.is_ok());
+    let reachable = supported && enabled && (active > 0 || s.desktop.connect().await.is_ok());
     Json(
-        json!({"supported":true,"enabled":enabled,"reachable":reachable,"protocol":"rfb","engine":"noVNC","activeSessions":active}),
+        json!({"supported":supported,"platform":platform,"reason":if supported { None } else { Some("Desktop session or sharing helper is unavailable") },"enabled":enabled,"reachable":reachable,"protocol":"rfb","engine":"noVNC","activeSessions":active}),
     )
 }
 pub async fn socket(
@@ -71,10 +128,22 @@ pub async fn socket(
     axum::Extension(principal): axum::Extension<crate::security::Principal>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    // Transport tests use an isolated loopback peer without requiring a desktop session.
+    #[cfg(test)]
+    let supported = s.desktop.supported() || s.desktop.target.is_some();
+    #[cfg(not(test))]
+    let supported = s.desktop.supported();
+    if !supported {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({"error":"Desktop session or sharing helper is unavailable"})),
+        )
+            .into_response();
+    }
     if !s.desktop.enabled().await {
         return (
             StatusCode::FORBIDDEN,
-            Json(json!({"error":"请先在 Mac 的 AnywhereHost 中启用远程桌面"})),
+            Json(json!({"error":"请先在本机 AnywhereHost 中启用远程桌面"})),
         )
             .into_response();
     }
@@ -88,7 +157,7 @@ pub async fn socket(
     let Ok(tcp) = s.desktop.connect().await else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error":"请在 Mac 系统设置中开启屏幕共享"})),
+            Json(json!({"error":"本机屏幕共享不可连接，请检查共享服务和权限"})),
         )
             .into_response();
     };
@@ -102,14 +171,14 @@ pub async fn socket(
 }
 async fn relay(
     ws: WebSocket,
-    tcp: TcpStream,
+    tcp: Box<dyn DesktopIo>,
     state: Arc<AppState>,
     principal: crate::security::Principal,
 ) {
     let session = uuid::Uuid::new_v4();
     let started = std::time::Instant::now();
     let (mut output, mut input) = ws.split();
-    let (mut reader, mut writer) = tcp.into_split();
+    let (mut reader, mut writer) = tokio::io::split(tcp);
     let mut uploaded = 0u64;
     let mut downloaded = 0u64;
     // Keep these futures alive across polls: cancelling a partially completed
@@ -255,6 +324,7 @@ mod tests {
                 dir.path().join("unused"),
                 dir.path().to_path_buf(),
                 1,
+                "fixture",
             ),
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

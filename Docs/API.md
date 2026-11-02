@@ -136,3 +136,7 @@ Permission settings remain native, including `sandboxPolicy: {type: dangerFullAc
 屏幕流通过现有 HTTPS/WSS 隧道传输，不进入 Codex 事件、历史或数据库。客户端使用 noVNC 自带的 RFB 认证，不在 Host 保存 Mac 登录密码。
 
 Project images require the same bearer authentication and canonical project-root checks as text files. The additive `images.projectRead` and `images.maxBytes` capabilities describe support. Image reads reject non-image signatures, directories, oversized files, absolute paths and symlinks outside the project. Clients resolve absolute Markdown image links against project roots before calling this endpoint.
+
+## Linux desktop capabilities
+
+Debian 13 uses the same Host protocol v2 and admin/device proofs. `/v1/capabilities.remoteDesktop.supported` and `/v1/desktop.supported` reflect the available desktop session and bundled Wayland/X11 helper. Desktop status additionally includes `platform.helper`, `platform.error`, `platform.started` and portal authorization guidance. `reachable` reports the private local RFB socket, not a system permission grant. Unsupported desktop sessions return HTTP 501; disabled sharing returns 403, and unavailable local sharing returns 503. All clients use the existing RFB-over-WSS endpoint, with no client-supplied targets or shell commands. See [Linux](LINUX.md).

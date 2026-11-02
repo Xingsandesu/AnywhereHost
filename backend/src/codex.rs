@@ -71,6 +71,7 @@ pub fn discover(config: &Config) -> Result<(PathBuf, bool)> {
         return Ok((path.clone(), path.to_string_lossy().contains(".app/")));
     }
     let home = std::env::var("HOME").unwrap_or_default();
+    #[cfg(target_os = "macos")]
     let apps = [
         "/Applications/Codex.app/Contents/Resources/codex".to_string(),
         "/Applications/Codex.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
@@ -82,6 +83,12 @@ pub fn discover(config: &Config) -> Result<(PathBuf, bool)> {
             "{home}/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
         ),
     ];
+    #[cfg(not(target_os = "macos"))]
+    let apps = [
+        "/opt/Codex/resources/codex".to_string(),
+        "/opt/codex/resources/codex".to_string(),
+        format!("{home}/.local/share/codex/resources/codex"),
+    ];
     for path in apps {
         let path = PathBuf::from(path);
         if executable(&path) {
@@ -91,9 +98,13 @@ pub fn discover(config: &Config) -> Result<(PathBuf, bool)> {
     let mut dirs: Vec<PathBuf> =
         std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
     dirs.extend([
-        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from(&home).join(".local/bin"),
+        PathBuf::from(&home).join(".cargo/bin"),
         PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/usr/bin"),
     ]);
+    #[cfg(target_os = "macos")]
+    dirs.push(PathBuf::from("/opt/homebrew/bin"));
     for dir in dirs {
         let p = dir.join("codex");
         if executable(&p) {
@@ -134,7 +145,13 @@ async fn methods(binary: &Path) -> Result<HashSet<String>> {
 async fn login_environment() -> Result<HashMap<String, String>> {
     let shell = std::env::var_os("SHELL")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/bin/zsh"));
+        .unwrap_or_else(|| {
+            PathBuf::from(if cfg!(target_os = "macos") {
+                "/bin/zsh"
+            } else {
+                "/bin/sh"
+            })
+        });
     ensure!(
         shell.is_absolute() && executable(&shell),
         "login shell is unavailable"
