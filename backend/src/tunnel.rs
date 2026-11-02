@@ -26,14 +26,18 @@ pub struct Tunnel {
     binary: PathBuf,
     dir: PathBuf,
     local_port: u16,
+    proxy_name: String,
     child: Mutex<Option<Child>>,
 }
 impl Tunnel {
-    pub fn new(binary: PathBuf, dir: PathBuf, local_port: u16) -> Self {
+    pub fn new(binary: PathBuf, dir: PathBuf, local_port: u16, host_fingerprint: &str) -> Self {
         Self {
             binary,
             dir,
             local_port,
+            // The public TLS identity is stable across restarts and distinct per Host.
+            // Do not expose usernames, paths or machine identifiers to the frps namespace.
+            proxy_name: format!("anywhere-host-{host_fingerprint}"),
             child: Mutex::new(None),
         }
     }
@@ -131,7 +135,7 @@ impl Tunnel {
             "frps 控制端口（serverPort）和 Host 映射端口（remotePort）必须不同"
         );
         ensure!(self.binary.is_file(), "app 内未找到 frpc，请运行打包脚本");
-        let value = render(&config, self.local_port)?;
+        let value = render(&config, self.local_port, &self.proxy_name)?;
         let path = self.dir.join("frpc.toml");
         private_write(&path, value.as_bytes())?;
         let log_path = self.dir.join("frpc.log");
@@ -231,7 +235,7 @@ fn diagnostic(output: &str, token: &str) -> String {
         .take(8000)
         .collect()
 }
-fn render(config: &TunnelConfig, local_port: u16) -> Result<String> {
+fn render(config: &TunnelConfig, local_port: u16, proxy_name: &str) -> Result<String> {
     let mut tls = toml::map::Map::new();
     tls.insert("enable".into(), true.into());
     if let Some(path) = &config.trusted_ca_file {
@@ -250,7 +254,7 @@ fn render(config: &TunnelConfig, local_port: u16) -> Result<String> {
       "serverAddr":config.server,"serverPort":config.server_port,"loginFailExit":true,
       "auth":{"method":"token","token":config.token},
       "transport":{"tls":tls},"log":{"disablePrintColor":true},
-      "proxies":[{"name":"anywhere-host","type":"tcp","localIP":"127.0.0.1","localPort":local_port,"remotePort":config.remote_port}]
+      "proxies":[{"name":proxy_name,"type":"tcp","localIP":"127.0.0.1","localPort":local_port,"remotePort":config.remote_port}]
     }))?;
     Ok(toml::to_string_pretty(&value)?)
 }
@@ -260,7 +264,12 @@ mod tests {
     #[tokio::test]
     async fn restart_preserves_intent_but_explicit_stop_clears_it() {
         let dir = tempfile::tempdir().unwrap();
-        let tunnel = Tunnel::new(dir.path().join("unused"), dir.path().to_owned(), 9443);
+        let tunnel = Tunnel::new(
+            dir.path().join("unused"),
+            dir.path().to_owned(),
+            9443,
+            "fixture",
+        );
         assert!(!tunnel.should_resume());
         tunnel.set_resume(true).unwrap();
         tunnel.shutdown().await.unwrap();
@@ -279,12 +288,16 @@ mod tests {
             token: "secret\"\n".into(),
             trusted_ca_file: None,
         };
-        let s = render(&c, 9443).unwrap();
+        let s = render(&c, 9443, "anywhere-host-fixture").unwrap();
         let v: toml::Value = toml::from_str(&s).unwrap();
         assert_eq!(v["proxies"].as_array().unwrap().len(), 1);
         assert_eq!(v["transport"]["tls"]["enable"].as_bool(), Some(true));
         assert!(v["transport"]["tls"].get("useSystemCa").is_none());
         assert_eq!(v["proxies"][0]["localIP"].as_str(), Some("127.0.0.1"));
+        assert_eq!(
+            v["proxies"][0]["name"].as_str(),
+            Some("anywhere-host-fixture")
+        );
     }
     #[test]
     fn diagnostic_redacts_before_truncating() {

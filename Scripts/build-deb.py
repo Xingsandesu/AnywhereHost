@@ -34,6 +34,10 @@ def main():
     if base64.b64decode(''.join(pem[1:-1])) != bytes.fromhex('302a300506032b6570032100') + base64.b64decode(key):
         raise RuntimeError('Linux and macOS update identities differ')
     version = tomllib.loads((ROOT / 'backend/Cargo.toml').read_text())['package']['version']
+    revision = (ROOT / 'Linux/packaging/revision').read_text().strip()
+    if not revision.isascii() or not revision.isdigit() or int(revision) < 1:
+        raise RuntimeError('Debian package revision must be a positive integer')
+    package_version = f'{version}-{revision}'
     target = 'x86_64-unknown-linux-gnu'
     # Explicit target avoids an ambient cargo configuration silently cross-compiling.
     flags = (os.environ['CARGO_ENCODED_RUSTFLAGS'].split('\x1f') if os.environ.get('CARGO_ENCODED_RUSTFLAGS')
@@ -47,13 +51,13 @@ def main():
     spec.loader.exec_module(desktop_builder)
     desktop_source = desktop_builder.build(args.desktop_container)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    output = args.output_dir.resolve() / f'anywhere-host_{version}-1_{arch}.deb'
+    output = args.output_dir.resolve() / f'anywhere-host_{package_version}_{arch}.deb'
     with tempfile.TemporaryDirectory(prefix='anywhere-deb-') as temporary:
         root = Path(temporary)
         stage = root / 'debian/anywhere-host'
         lib = stage / 'usr/lib/anywhere-host'
         lib.mkdir(parents=True)
-        (lib / 'version.txt').write_text(version + '\n')
+        (lib / 'version.txt').write_text(package_version + '\n')
         for binary in ('anywhere-host', 'anywhere-permission-probe'):
             shutil.copy2(ROOT / 'target' / target / 'release' / binary, lib / binary)
         for name in ('w0vncserver', 'x0vncserver', 'vncpasswd'):
@@ -92,7 +96,7 @@ def main():
         control.mkdir()
         size = sum(p.stat().st_size for p in stage.rglob('*') if p.is_file()) // 1024
         (control / 'control').write_text(f'''Package: anywhere-host
-Version: {version}-1
+Version: {package_version}
 Section: net
 Priority: optional
 Architecture: {arch}

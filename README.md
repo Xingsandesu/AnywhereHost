@@ -8,7 +8,7 @@
 
 ## Linux（Debian 13 amd64）
 
-提供 GTK 管理界面、Rust 后端和固定校验和的 Linux frpc。源码构建：`python3 Scripts/build-deb.py`；安装：`sudo apt install ./dist/anywhere-host_0.1.4-1_amd64.deb`。从应用菜单或 `anywhere-host-gtk` 启动。依赖、权限、运行时配置与验证说明见 [Linux 指南](Docs/LINUX.md)。
+提供 GTK 管理界面、Rust 后端和固定校验和的 Linux frpc。源码构建：`python3 Scripts/build-deb.py`；安装：`sudo apt install ./dist/anywhere-host_0.1.4-2_amd64.deb`。从应用菜单或 `anywhere-host-gtk` 启动。依赖、权限、运行时配置与验证说明见 [Linux 指南](Docs/LINUX.md)。
 
 ## macOS 使用
 

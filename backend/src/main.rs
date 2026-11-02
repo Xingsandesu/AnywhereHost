@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
         security: security::Security::open(dir.join("devices-v2.json"))?,
         desktop: desktop::Desktop::new(dir.join("desktop.json")),
         token,
-        fingerprint,
+        fingerprint: fingerprint.clone(),
         config: config.clone(),
         codex: RwLock::new(None),
         runtime_error: RwLock::new(None),
@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
         events,
         apns,
         apns_error,
-        tunnel: tunnel::Tunnel::new(frpc, dir.clone(), config.listen.port()),
+        tunnel: tunnel::Tunnel::new(frpc, dir.clone(), config.listen.port(), &fingerprint),
     });
     live_activity::start(state.clone());
     let certificates = rustls_pemfile::certs(&mut std::io::BufReader::new(std::fs::File::open(

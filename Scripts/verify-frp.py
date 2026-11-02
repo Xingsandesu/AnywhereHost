@@ -11,6 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ARCH = {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'amd64'}[platform.machine()]
@@ -26,7 +27,10 @@ def free_port():
 
 with tempfile.TemporaryDirectory(prefix='anywhere-frp-') as temporary:
     directory = pathlib.Path(temporary)
-    host_port, control_port, public_port, occupied_port = [free_port() for _ in range(4)]
+    ports = set()
+    while len(ports) < 6:
+        ports.add(free_port())
+    host_port, control_port, public_port, occupied_port, second_host_port, second_public_port = ports
     (directory / 'config.json').write_text(json.dumps({
         'listen': f'127.0.0.1:{host_port}', 'codexHome': temporary,
         'codexBinary': str(ROOT / 'Scripts/fake-codex.py'),
@@ -38,13 +42,15 @@ with tempfile.TemporaryDirectory(prefix='anywhere-frp-') as temporary:
     logs = [(directory / 'host.log').open('w'), (directory / 'server.log').open('w')]
     host = subprocess.Popen([str(ROOT / 'target/debug/anywhere-host'), '--state-dir', temporary], stdout=logs[0], stderr=logs[0])
     server = None
+    second_host = None
 
-    def call(listen, path, body=None, expected=200):
+    def call(listen, path, body=None, expected=200, state_directory=directory):
         connection = http.client.HTTPSConnection('127.0.0.1', listen, context=ssl._create_unverified_context(), timeout=3)
         connection.connect()
-        assert connection.sock.getpeercert(binary_form=True) == ssl.PEM_cert_to_DER_cert((directory / 'host-cert.pem').read_text())
+        certificate = ssl.PEM_cert_to_DER_cert((state_directory / 'host-cert.pem').read_text())
+        assert connection.sock.getpeercert(binary_form=True) == certificate
         connection.request('GET' if body is None else 'POST', path, None if body is None else json.dumps(body), {
-            **admin_headers(listen,(directory/'admin-key-v2').read_text(),ssl.PEM_cert_to_DER_cert((directory/'host-cert.pem').read_text()),'GET' if body is None else 'POST',path,None if body is None else json.dumps(body)), 'Content-Type': 'application/json',
+            **admin_headers(listen,(state_directory/'admin-key-v2').read_text(),certificate,'GET' if body is None else 'POST',path,None if body is None else json.dumps(body)), 'Content-Type': 'application/json',
         })
         response = connection.getresponse()
         value = json.loads(response.read())
@@ -73,7 +79,7 @@ bindPort = {control_port}
 auth.method = "token"
 auth.token = "{TOKEN}"
 transport.tls.force = true
-allowPorts = [{{ single = {public_port} }}, {{ single = {occupied_port} }}]
+allowPorts = [{{ single = {public_port} }}, {{ single = {occupied_port} }}, {{ single = {second_public_port} }}]
 '''
         if custom_certificate:
             text += f'transport.tls.certFile = {json.dumps(str(directory / "host-cert.pem"))}\n'
@@ -111,9 +117,34 @@ allowPorts = [{{ single = {public_port} }}, {{ single = {occupied_port} }}]
         assert (directory / 'frpc.toml').stat().st_mode & 0o777 == 0o600
         assert (directory / 'frpc.log').stat().st_mode & 0o777 == 0o600
         print('PASS default frp TLS without CA: real forwarding, private config, redacted diagnostics')
+
+        # Two real Host identities must coexist on the same frps, with separate ports.
+        first_name = tomllib.loads((directory / 'frpc.toml').read_text())['proxies'][0]['name']
+        second_directory = directory / 'second-host'
+        second_directory.mkdir()
+        (second_directory / 'config.json').write_text(json.dumps({
+            'listen': f'127.0.0.1:{second_host_port}', 'codexHome': str(second_directory),
+            'codexBinary': str(ROOT / 'Scripts/fake-codex.py'), 'frpcBinary': str(ROOT / 'Resources/frpc'),
+        }))
+        logs.append((second_directory / 'host.log').open('w'))
+        second_host = subprocess.Popen([str(ROOT / 'target/debug/anywhere-host'), '--state-dir', str(second_directory)],
+                                       stdout=logs[-1], stderr=logs[-1])
+        wait_for(lambda: call(second_host_port, '/v1/status', state_directory=second_directory)['connected'], 'second Host failed to start')
+        call(second_host_port, '/v1/tunnel', config(remotePort=second_public_port), state_directory=second_directory)
+        wait_for(lambda: call(second_public_port, '/v1/status', state_directory=second_directory)['connected'], 'second Host proxy unavailable')
+        wait_public()
+        second_name = tomllib.loads((second_directory / 'frpc.toml').read_text())['proxies'][0]['name']
+        assert first_name != second_name and all(name.startswith('anywhere-host-') for name in (first_name, second_name))
+        call(second_host_port, '/v1/tunnel/stop', {}, state_directory=second_directory)
+        second_host.terminate()
+        second_host.wait(timeout=8)
+        print('PASS two Host identities forward concurrently through the same frps without proxy-name collisions')
         stop_tunnel()
 
         # Restart Host: settings survive and a blank token can reuse the same frps credential.
+        # An old fixed-name config is upgraded without changing connection settings.
+        saved = directory / 'frpc.toml'
+        saved.write_text(saved.read_text().replace(first_name, 'anywhere-host'))
         host.terminate()
         host.wait(timeout=8)
         host = subprocess.Popen([str(ROOT / 'target/debug/anywhere-host'), '--state-dir', temporary], stdout=logs[0], stderr=logs[0])
@@ -121,10 +152,11 @@ allowPorts = [{{ single = {public_port} }}, {{ single = {occupied_port} }}]
         assert call(host_port, '/v1/tunnel')['config']['serverPort'] == control_port
         call(host_port, '/v1/tunnel', config(token=''))
         wait_public()
+        assert tomllib.loads(saved.read_text())['proxies'][0]['name'] == first_name
         stop_tunnel()
         assert '重新输入 token' in call(host_port, '/v1/tunnel', config(token='', serverPort=free_port()), 400)['error']
         assert '必须不同' in call(host_port, '/v1/tunnel', config(remotePort=control_port), 400)['error']
-        print('PASS configuration recovery and credential reuse restricted to original frps endpoint')
+        print('PASS legacy proxy-name migration, stable identity, configuration recovery and restricted credential reuse')
 
         with socket.socket() as blocker:
             blocker.bind(('127.0.0.1', occupied_port))
@@ -150,7 +182,7 @@ allowPorts = [{{ single = {public_port} }}, {{ single = {occupied_port} }}]
         stop_tunnel()
         print('PASS custom CA verified frps connection and pinned Host HTTPS forwarding')
     finally:
-        for process in [host, server]:
+        for process in [host, second_host, server]:
             if process and process.poll() is None:
                 process.terminate()
                 try:

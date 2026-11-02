@@ -23,13 +23,15 @@ Linux 没有 macOS 的 TCC“完全磁盘访问”授权位。文件和自动化
 ## 安装与使用
 
 ```sh
-sudo apt install ./anywhere-host_0.1.4-1_amd64.deb
+sudo apt install ./anywhere-host_0.1.4-2_amd64.deb
 anywhere-host-gtk
 ```
 
 也可以从应用菜单启动。完成向导前，需要已经安装、登录 Codex App 或 CLI。已有配置会在打开应用时自动启动服务；新安装在向导中启动。关窗后服务继续运行；应用菜单或状态图标中的“退出”会关闭其自有 Host、frpc、桌面共享及独立 Codex 子进程，不停止外部共享 Codex。
 
 GNOME 的状态图标需要 `gnome-shell-extension-appindicator`（包推荐依赖）。安装后如当前会话尚未发现扩展，重新登录，再点击“启用 GNOME 状态图标”。其他支持 StatusNotifierItem 的桌面直接显示图标。没有托盘宿主时仍可后台驻留，并通过应用菜单重新打开窗口；UI 明确显示托盘连接状态。
+
+多台 Host 可以共用一个 frps：代理名称根据各自的 Host 证书指纹自动生成，重启后保持稳定；每台 Host 必须使用不同的公网映射端口。旧的固定 `anywhere-host` 名称在下次启动隧道时自动迁移，现有地址、令牌与端口保留。
 
 ### 桌面共享
 

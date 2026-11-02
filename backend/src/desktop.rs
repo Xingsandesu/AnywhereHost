@@ -324,6 +324,7 @@ mod tests {
                 dir.path().join("unused"),
                 dir.path().to_path_buf(),
                 1,
+                "fixture",
             ),
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

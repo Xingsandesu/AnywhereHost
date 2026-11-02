@@ -12,6 +12,8 @@
 
 The Debian package is an unsigned development artifact. Production OTA needs a release signed with the existing Host identity. Physical-session portal persistence, real-device WAN use and full accessibility acceptance remain manual checks. Swift is unavailable on this Linux host, so the macOS build was not verified here.
 
+Debian revision `0.1.4-2` fixes the shared frps proxy-name collision. The real frp fixture now runs two Hosts simultaneously against one frps and verifies both pinned HTTPS endpoints, distinct names, stable names after restart and migration from the old fixed name. All six frp cases, 47 Rust tests, strict Clippy and 72 Host checks passed again.
+
 ## Source checks
 
 ```sh
