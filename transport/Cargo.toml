@@ -1,0 +1,25 @@
+[package]
+name = "anywhere-transport"
+version = "1.1.4"
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+base64 = "0.22"
+anyhow = "1"
+iroh = "=1.4.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+getrandom = "0.3"
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+# netwatch 0.19 uses routing constants removed from libc's iOS exports in 0.2.190.
+libc = "=0.2.186"
+
+[dev-dependencies]
+iroh-relay = { version = "=1.4.1", features = ["server"] }

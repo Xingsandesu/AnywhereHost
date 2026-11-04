@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>Anywhere Host</string>
+<key>CFBundleDisplayName</key><string>Anywhere Host</string>
+<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+<key>LSMinimumSystemVersion</key><string>27.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSPrincipalClass</key><string>NSApplication</string>
+<key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+<key>ITSAppUsesNonExemptEncryption</key><false/>
+<key>NSDocumentsFolderUsageDescription</key><string>Anywhere Host 需要访问文稿中的项目，以检查目录读写并运行你的开发任务。</string>
+<key>NSDesktopFolderUsageDescription</key><string>Anywhere Host 需要访问桌面中的项目，以检查目录读写并运行你的开发任务。</string>
+<key>NSDownloadsFolderUsageDescription</key><string>Anywhere Host 需要访问下载目录中的项目，以检查目录读写并运行你的开发任务。</string>
+<key>NSLocalNetworkUsageDescription</key><string>Anywhere Host 需要连接你配置的局域网服务器和开发工具，以提供远程开发服务。</string>
+<key>NSAppleEventsUsageDescription</key><string>Anywhere Host 及你运行的开发工具需要在你允许后与 Xcode、终端等应用交互，以完成开发任务。</string>
+<key>SUFeedURL</key><string>https://github.com/Xingsandesu/AnywhereHost/releases/latest/download/appcast.xml</string>
+<key>SUPublicEDKey</key><string>/qwAlYZo1HZbFRNo6COLZ2cQO4Z+yDo77Rz6O6CivwM=</string>
+<key>SUEnableAutomaticChecks</key><true/>
+<key>SUAutomaticallyUpdate</key><false/>
+</dict></plist>

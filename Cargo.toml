@@ -1,0 +1,14 @@
+[workspace]
+members = ["backend", "transport", "relay"]
+resolver = "2"
+exclude = ["Vendor/iroh"]
+
+# netdev 0.46.3 uses macOS-only APIs on iOS. Pin the upstream public-API fix
+# until netwatch accepts a released netdev version containing it.
+[patch.crates-io]
+iroh = { path = "Vendor/iroh" }
+netdev = { git = "https://github.com/shellrow/netdev", rev = "b3bfb0fb5595cd143bfa0b9f07d1ad6e0ef0c313" }
+
+[profile.release]
+lto = "thin"
+strip = true

@@ -1,0 +1,20 @@
+{
+  "name": "anywhere-notifications",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "4.156.1"
+  },
+  "dependencies": {
+    "asn1js": "3.0.7",
+    "cbor": "10.0.11",
+    "node-app-attest": "1.0.1",
+    "pkijs": "3.3.3"
+  },
+  "version": "1.1.4"
+}

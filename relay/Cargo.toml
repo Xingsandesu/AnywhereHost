@@ -1,0 +1,17 @@
+[package]
+name = "anywhere-relay"
+version = "1.1.2"
+edition = "2024"
+license = "Apache-2.0"
+[dependencies]
+anyhow = "1"
+anywhere-transport = { path = "../transport" }
+iroh = "=1.4.1"
+iroh-relay = { version = "=1.4.1", features = ["server"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "prefer-post-quantum"] }
+serde = {version="1",features=["derive"]}
+toml = "0.9"
+tokio = {version="1",features=["full"]}
+
+[dev-dependencies]
+serde_json = "1"

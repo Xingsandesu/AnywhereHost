@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "anywhere-notifications",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "routes": [{"pattern":"connect.jintongshu.com","custom_domain":true}],
+  "preview_urls": false,
+  "observability": {
+    "enabled": false
+  },
+  "ratelimits": [
+    {
+      "name": "IP_LIMIT",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
+  ],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AUTHORITY",
+        "class_name": "RelayAuthority"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "network-v1-reverted",
+      "new_sqlite_classes": [
+        "RelayAuthority"
+      ]
+    }
+  ]
+}

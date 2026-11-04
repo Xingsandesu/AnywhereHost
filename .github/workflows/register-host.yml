@@ -1,0 +1,34 @@
+name: Register published Host
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Official notarized Mac release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  register:
+    if: github.repository == 'Xingsandesu/AnywhereHost' && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Verify the official published artifact and register its signed code
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-signed\.[a-f0-9]{12})?$ ]]
+          gh release download "$RELEASE_TAG" --dir input --pattern '*-macos-arm64-notarized.zip' --pattern SHA256SUMS
+          archive=$(python3 Scripts/ci-release.py package input notarized)
+          ditto -x -k "$archive" work
+          source_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
+          python3 Scripts/register-host.py work/AnywhereHost.app "$source_sha"

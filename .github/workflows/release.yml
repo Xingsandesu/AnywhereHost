@@ -1,0 +1,184 @@
+name: Sign and release packages
+
+on:
+  workflow_run:
+    workflows: [Build packages]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful main Build packages run ID
+        required: true
+        type: string
+      stable:
+        description: Publish a new stable version with verified OTA signatures
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+# A rerun must never race another publisher for the same source build.
+concurrency:
+  group: release-${{ inputs.build_run_id || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: >-
+      github.repository == 'Xingsandesu/AnywhereHost' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      run_id: ${{ steps.source.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Validate build origin and main ancestry before accessing secrets
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id }}
+          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+        run: |
+          flags=()
+          if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi
+          python3 Scripts/ci-release.py source "$BUILD_RUN_ID" "${flags[@]}"
+
+  macos:
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    needs: source
+    runs-on: xcode-27
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: anywhere-host-macos-arm64-unsigned-${{ needs.source.outputs.sha }}
+          path: input
+          run-id: ${{ needs.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify source checksum and extract the built app
+        run: |
+          archive=$(python3 Scripts/ci-release.py package input unsigned)
+          ditto -x -k "$archive" work
+          python3 Scripts/verify-app.py work/AnywhereHost.app --unsigned
+      - name: Sign with Developer ID Application
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash Scripts/ci-sign-macos.sh work/AnywhereHost.app
+      - name: Notarize, staple and verify Gatekeeper
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' work/AnywhereHost.app/Contents/Info.plist)
+          bash Scripts/notarize-app.sh work/AnywhereHost.app "output/AnywhereHost-${version}-macos-arm64-notarized.zip"
+          python3 Scripts/verify-app.py work/AnywhereHost.app --integration
+          cd output
+          shasum -a 256 ./*.zip > SHA256SUMS
+      - name: Register the notarized Host for automatic network admission
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: python3 Scripts/register-host.py work/AnywhereHost.app "$SOURCE_SHA"
+      - name: Prepare pinned Sparkle and OpenSSL tools
+        if: inputs.stable == true
+        run: |
+          swift package resolve
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Sign and verify the Sparkle update
+        if: inputs.stable == true
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          archive=$(python3 Scripts/ci-release.py package output notarized)
+          python3 Scripts/ota.py sign "$archive" ota-output
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: inputs.stable == true
+        with:
+          name: anywhere-host-ota-${{ needs.source.outputs.sha }}
+          path: ota-output/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: anywhere-host-macos-arm64-notarized-${{ needs.source.outputs.sha }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Remove temporary signing and notarization keychains
+        if: always()
+        run: |
+          for directory in "$RUNNER_TEMP"/anywhere-sign.* "$RUNNER_TEMP"/anywhere-notary.* "$RUNNER_TEMP"/anywhere-ota-sign-*; do
+            [[ -d "$directory" ]] || continue
+            for keychain in "$directory"/*.keychain-db; do
+              security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            done
+            rm -rf "$directory"
+          done
+
+  publish:
+    needs: [source, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: anywhere-host-macos-arm64-notarized-${{ needs.source.outputs.sha }}
+          path: artifacts/notarized
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        if: inputs.stable == true
+        with:
+          name: anywhere-host-ota-${{ needs.source.outputs.sha }}
+          path: artifacts/ota
+      - name: Check package hashes and version
+        id: packages
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          BUILD_RUN_ID: ${{ needs.source.outputs.run_id }}
+          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+        run: |
+          flags=()
+          if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi
+          python3 Scripts/ci-release.py assemble artifacts release "$SOURCE_SHA" "$BUILD_RUN_ID" "${flags[@]}"
+      - name: Publish release and verify public downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          RELEASE_TAG: ${{ steps.packages.outputs.tag }}
+          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+        run: |
+          flags=()
+          if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi
+          python3 Scripts/ci-release.py publish release "$RELEASE_TAG" "$SOURCE_SHA" "${flags[@]}"

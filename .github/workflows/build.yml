@@ -1,0 +1,90 @@
+name: Build packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Do not cancel earlier pushes: every pushed revision should get its own packages.
+jobs:
+  notifications:
+    name: Source and Notification Worker checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - name: Validate version and release tools
+        run: |
+          python3 Scripts/version.py
+          python3 Scripts/test-ci-release.py
+          python3 Scripts/test-ota.py
+      - name: Validate notification boundary without cloud credentials
+        run: |
+          node --version
+          python3 Scripts/test-notifications.py
+          cd notification-worker
+          npm ci
+          npm test
+          npm run check
+
+  macos:
+    name: macOS arm64
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '27.0'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Prepare native build tools
+        run: |
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          rustup target add aarch64-apple-ios
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Validate Rust and Swift sources
+        run: |
+          cargo fmt --all --check
+          cargo build --locked --bins
+          cargo test --workspace --locked
+          cargo clippy --workspace --locked --all-targets -- -D warnings
+          python3 Scripts/verify-host.py
+          swift build
+          swift test
+          cargo check --locked -p anywhere-transport --target aarch64-apple-ios
+      - name: Build and verify unsigned arm64 app
+        run: |
+          ./Scripts/build-app.sh --unsigned
+          python3 Scripts/verify-app.py dist/AnywhereHost.app --unsigned --integration
+      - name: Archive app and checksum
+        run: |
+          version=$(python3 Scripts/version.py | cut -d ' ' -f 1)
+          archive="AnywhereHost-${version}-macos-arm64-unsigned.zip"
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent AnywhereHost.app "$archive"
+          shasum -a 256 "$archive" > SHA256SUMS
+          shasum -a 256 --check SHA256SUMS
+      - name: Upload macOS package and checksum
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: anywhere-host-macos-arm64-unsigned-${{ github.sha }}
+          path: |
+            dist/*-macos-arm64-unsigned.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

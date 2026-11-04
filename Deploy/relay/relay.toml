@@ -1,0 +1,6 @@
+http = "127.0.0.1:18080"
+https = "127.0.0.1:18443"
+quic = "0.0.0.0:7842"
+metrics = "127.0.0.1:19090"
+certificate = "/etc/iroh-relay/certs/fullchain.pem"
+private_key = "/etc/iroh-relay/certs/privkey.pem"

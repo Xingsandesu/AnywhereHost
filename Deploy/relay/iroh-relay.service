@@ -1,0 +1,22 @@
+[Unit]
+Description=Anywhere iroh relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=iroh-relay
+Group=iroh-relay
+StateDirectory=iroh-relay
+WorkingDirectory=/var/lib/iroh-relay
+ExecStart=/usr/local/bin/anywhere-relay /etc/iroh-relay/relay.toml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

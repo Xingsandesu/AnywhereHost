@@ -1,0 +1,13 @@
+/target/
+/.build/
+/dist/
+/.DS_Store
+*.xcuserstate
+xcuserdata/
+__pycache__/
+*.pyc
+/notification-worker/node_modules/
+/notification-worker/.wrangler/
+/notification-worker/.dev.vars*
+/notification-worker/.env*
+/.wrangler/
