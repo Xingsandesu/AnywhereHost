@@ -86,33 +86,61 @@ async fn operation(v: Value) -> Result<Value> {
                     true,
                 )
             };
-            let addr = address(v["hostId"].as_str().unwrap_or(""), &relays)?;
-            let connection = tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                endpoint.connect(addr, ALPN),
-            )
-            .await??;
-            let expires = Arc::new(AtomicU64::new(u64::MAX));
-            if official {
-                let response = tokio::time::timeout(
+            let established = async {
+                let addr = address(v["hostId"].as_str().unwrap_or(""), &relays)?;
+                let connection = tokio::time::timeout(
                     std::time::Duration::from_secs(15),
-                    call(
-                        &connection,
-                        &Request {
-                            id: "admission".into(),
-                            method: "admission.exchange".into(),
-                            params: json!({"token":token}),
-                        },
-                    ),
+                    endpoint.connect(addr, ALPN),
                 )
                 .await??;
-                let peer = admission::verify(
-                    response["token"].as_str().unwrap_or(""),
-                    &connection.remote_id().to_string(),
-                    Some("host"),
-                )?;
-                let own = admission::verify(token, &endpoint.id().to_string(), Some("client"))?;
-                expires.store(peer.exp.min(own.exp), Ordering::SeqCst);
+                let expires = Arc::new(AtomicU64::new(u64::MAX));
+                if official {
+                    let response = tokio::time::timeout(
+                        std::time::Duration::from_secs(15),
+                        call(
+                            &connection,
+                            &Request {
+                                id: "admission".into(),
+                                method: "admission.exchange".into(),
+                                params: json!({"token":token}),
+                            },
+                        ),
+                    )
+                    .await??;
+                    let peer = admission::verify(
+                        response["token"].as_str().unwrap_or(""),
+                        &connection.remote_id().to_string(),
+                        Some("host"),
+                    )?;
+                    let own = admission::verify(token, &endpoint.id().to_string(), Some("client"))?;
+                    expires.store(peer.exp.min(own.exp), Ordering::SeqCst);
+                }
+                if let Some(ticket) = v["ticket"].as_str() {
+                    let reply = tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        call(
+                            &connection,
+                            &Request {
+                                id: "pair".into(),
+                                method: "pairing.accept".into(),
+                                params: json!({"ticket":ticket}),
+                            },
+                        ),
+                    )
+                    .await??;
+                    ensure!(reply.get("error").is_none(), "Pairing expired or rejected");
+                }
+                Ok::<_, anyhow::Error>((connection, expires))
+            }
+            .await;
+            let (connection, expires) = match established {
+                Ok(value) => value,
+                Err(error) => {
+                    endpoint.close().await;
+                    return Err(error);
+                }
+            };
+            if official {
                 let deadline = expires.clone();
                 let watch = connection.clone();
                 tokio::spawn(async move {
@@ -123,18 +151,6 @@ async fn operation(v: Value) -> Result<Value> {
                         }
                     }
                 });
-            }
-            if let Some(ticket) = v["ticket"].as_str() {
-                let reply = call(
-                    &connection,
-                    &Request {
-                        id: "pair".into(),
-                        method: "pairing.accept".into(),
-                        params: json!({"ticket":ticket}),
-                    },
-                )
-                .await?;
-                ensure!(reply.get("error").is_none(), "Pairing expired or rejected");
             }
             let handle = NEXT.fetch_add(1, Ordering::Relaxed);
             handles().lock().unwrap().clients.insert(
@@ -173,6 +189,24 @@ async fn operation(v: Value) -> Result<Value> {
             Ok(json!({}))
         }
         "status" => Ok(connection_status(&client(&v)?.connection)),
+        "probe" => {
+            let c = client(&v)?;
+            // Local QUIC state can remain connected while the peer has already
+            // timed out a suspended phone. Bound recovery by an actual round trip.
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                c.endpoint.network_change().await;
+                call(
+                    &c.connection,
+                    &Request {
+                        id: "foreground-probe".into(),
+                        method: "host.status".into(),
+                        params: json!({}),
+                    },
+                )
+                .await
+            })
+            .await?
+        }
         "call" => {
             let c = client(&v)?;
             let request = serde_json::from_value(v["request"].clone())?;
@@ -237,6 +271,8 @@ async fn operation(v: Value) -> Result<Value> {
             let stream = handles().lock().unwrap().streams.remove(&id(&v)?);
             if let Some(stream) = stream {
                 stream.cancelled.cancel();
+                let mut recv = stream.recv.lock().await;
+                let _ = recv.stop(0u32.into());
                 let mut send = stream.send.lock().await;
                 let _ = send.reset(0u32.into());
             }

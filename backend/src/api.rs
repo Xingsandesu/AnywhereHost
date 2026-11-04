@@ -165,7 +165,7 @@ pub async fn dispatch(
                 .iter()
                 .filter(|m| c.as_ref().is_some_and(|c| c.runtime.methods.contains(**m)))
                 .collect();
-            json!({"protocolVersion":3,"methods":methods,"images":{"projectRead":true,"maxBytes":12582912},"remoteDesktop":{"supported":true,"protocol":"rfb","transport":"iroh"},"events":{"replay":true,"epoch":s.events.epoch(),"textDeltaOffsets":"utf8"},"history":{"itemPagination":true},"approvals":true,"threadAccess":true,"liveActivityPush":notification_status(s).await})
+            json!({"protocolVersion":3,"methods":methods,"images":{"projectRead":true,"maxBytes":12582912},"remoteDesktop":{"supported":true,"protocol":"rfb","transport":"iroh"},"events":{"replay":true,"checkpoints":true,"epoch":s.events.epoch(),"textDeltaOffsets":"utf8"},"history":{"itemPagination":true},"approvals":true,"threadAccess":true,"liveActivityPush":notification_status(s).await})
         }
         "codex.call" => rpc(s, serde_json::from_value(p)?).await,
         "requests.list" => {

@@ -29,7 +29,6 @@ if args.version:
     native_path.write_text(re.sub(r'^version = "[^"]+"', f'version = "{args.version}"', native_path.read_text(), count=1, flags=re.M))
     if client_path:
         client_text = re.sub(r'MARKETING_VERSION = [^;]+;', f'MARKETING_VERSION = {args.version};', client_path.read_text())
-        client_text = re.sub(r'CURRENT_PROJECT_VERSION = [^;]+;', f'CURRENT_PROJECT_VERSION = {args.build};', client_text)
         client_path.write_text(client_text)
     lock_path = root / 'Cargo.lock'
     lock_path.write_text(re.sub(r'(name = "anywhere-(?:host|transport)"\nversion = ")[^"]+',

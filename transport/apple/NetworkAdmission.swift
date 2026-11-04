@@ -10,6 +10,7 @@ actor NetworkAdmission {
     struct Failure: LocalizedError { let message: String; var errorDescription: String? { message } }
     private let role: String
     private var tail: Task<Void, Never>?
+    private var leases: [Data: Lease] = [:]
     private let session: URLSession
     init(role: String) {
         self.role = role
@@ -20,7 +21,16 @@ actor NetworkAdmission {
     }
     func lease(secret: Data) async throws -> Lease {
         let previous = tail
-        let task = Task { if let previous { await previous.value }; return try await self.issue(secret: secret) }
+        let task = Task {
+            if let previous { await previous.value }
+            // Reconnects use the same signed identity. Do not repeat App Attest
+            // and three HTTP exchanges while its in-memory lease is still fresh.
+            if let lease = self.leases[secret], lease.expiresAt > Date().timeIntervalSince1970 + 360 { return lease }
+            let lease = try await self.issue(secret: secret)
+            self.leases = self.leases.filter { $0.value.expiresAt > Date().timeIntervalSince1970 }
+            self.leases[secret] = lease
+            return lease
+        }
         tail = Task { _ = try? await task.value }
         return try await task.value
     }

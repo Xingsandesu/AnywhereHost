@@ -114,7 +114,6 @@ async fn connection_loop(
     state: Arc<AppState>,
     connection: iroh::endpoint::Connection,
 ) -> Result<()> {
-    let _registration = state.connections.track(&connection);
     let owner = connection.remote_id().to_string();
     let mut admission_expires = u64::MAX;
     if state.config.relay_urls.is_empty() {
@@ -124,6 +123,8 @@ async fn connection_loop(
         )
         .await??;
     }
+    // Only admit a replacement after the official-app exchange succeeds.
+    let _registration = state.connections.track(&connection);
     let admission_expires = Arc::new(std::sync::atomic::AtomicU64::new(admission_expires));
     let mut revocations = state.security.revocations.subscribe();
     let slots = Arc::new(Semaphore::new(16));
@@ -294,6 +295,7 @@ async fn events(
             continue;
         }
         tokio::select! {
+            _=send.stopped()=>break,
             _=revoked(&state,owner)=>break,
             _=heartbeat.tick()=>{tokio::time::timeout(Duration::from_secs(15),write_json(send,&json!({"heartbeat":true,"epoch":epoch,"sequence":after}))).await??;},
             result=rx.recv()=>{if matches!(result,Err(tokio::sync::broadcast::error::RecvError::Closed)){break;}}
@@ -376,9 +378,17 @@ mod tests {
             assert!(anywhere_transport::call(&conn,&req("devices.list",json!({}))).await?.get("error").is_some());
             let mutation=req("codex.call",json!({"method":"turn/start","params":{}}));
             let first=anywhere_transport::call(&conn,&mutation).await?;
-            conn.close(0u32.into(),b"reconnect");
-            let conn=client.connect(addr.clone(),anywhere_transport::ALPN).await?;
+            // Simulate a cold-started phone with the same paired key while the
+            // previous connection is still alive at the Host.
+            let replacement=iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).clear_ip_transports().secret_key(key.clone()).relay_mode(iroh::RelayMode::Custom(iroh::RelayMap::from_iter([urls[0].parse::<iroh::RelayUrl>()?]))).bind().await?;
+            let _previous=conn;
+            let conn=replacement.connect(addr.clone(),anywhere_transport::ALPN).await?;
             assert_eq!(anywhere_transport::call(&conn,&mutation).await?,first);
+            let devices=execute(&state,req("devices.list",json!({})),"local",true).await;
+            assert_eq!(devices["devices"].as_array().unwrap().len(),1);
+            assert_eq!(devices["connections"][client.id().to_string()].as_array().unwrap().len(),1);
+            client.close().await;
+            replacement.network_change().await;
             state.events.publish(json!({"method":"fixture"}))?;
             let (mut send,mut recv)=conn.open_bi().await?;
             write_json(&mut send,&req("events.subscribe",json!({"after":0,"epoch":state.events.epoch()}))).await?;
@@ -417,9 +427,9 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(3),conn.closed()).await?;
             assert_eq!(anywhere_transport::connection_status(&conn)["state"],"disconnected");
             assert!(state.security.devices()["devices"].as_array().unwrap().is_empty());
-            let conn=client.connect(addr,anywhere_transport::ALPN).await?;
+            let conn=replacement.connect(addr,anywhere_transport::ALPN).await?;
             assert!(anywhere_transport::call(&conn,&req("pairing.accept",json!({"ticket":ticket}))).await?.get("error").is_some());
-            client.close().await;state.endpoint.close().await;task.abort();relay.shutdown().await?;
+            replacement.close().await;client.close().await;state.endpoint.close().await;task.abort();relay.shutdown().await?;
             Ok::<_,anyhow::Error>(())
         }).await??;
         Ok(())

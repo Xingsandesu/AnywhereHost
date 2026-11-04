@@ -19,7 +19,7 @@ ALPN 为 `anywhere/0.4`。每个 RPC 或资源请求使用独立双向流；事�
 
 连接首先执行[接入资格交换](RELAY.md)，再按[设备授权](SECURITY.md)开放业务接口。
 
-事件流在追上订阅时捕获的序号后立即返回 `{"heartbeat":true,"epoch":"…","sequence":N}`，此后定期发送同结构心跳。sequence 仅表示该流已发送的最后序号；客户端核对已应用游标后才确认实时同步恢复。进入后台可关闭订阅流并保留连接与游标，回到前台从该游标重新订阅，无须重取已完整加载的历史。
+事件流在追上订阅时捕获的序号后立即返回 `{"heartbeat":true,"epoch":"…","sequence":N}`，此后定期发送同结构心跳。sequence 仅表示该流已发送的最后序号；客户端核对已应用游标后才确认实时同步恢复。客户端进入后台保留订阅、连接、游标与进行中的历史读取，仅停止定时轮询。回到前台进行有时限的状态探测；连接失效时替换连接并从已应用游标重新订阅，无须重取已完整加载的历史。`host.capabilities.events.checkpoints=true` 表示支持心跳游标确认；客户端必须先核验此能力。
 
 事件按 `epoch` 和 sequence 恢复；客户端只推进已应用事件的游标并丢弃重复序号。游标超出保留范围、Host 重启、运行时重新接入或事件写入失败时返回 `409`，客户端重新获取快照。事件写入恢复后更换 epoch；旧游标不能跨越未记录的事件。
 
@@ -35,6 +35,6 @@ ALPN 为 `anywhere/0.4`。每个 RPC 或资源请求使用独立双向流；事�
 
 ## 连接状态
 
-`devices.list` 返回 `devices`（已授权 EndpointId 数组）与 `connections`（以 EndpointId 为键的连接快照数组）。离线设备数组为空；同一设备的多个连接分别保留。
+`devices.list` 返回 `devices`（已授权 EndpointId 数组）与 `connections`（以 EndpointId 为键的连接快照数组）。离线设备数组为空；每个已配对设备最多保留一条有效连接。新连接通过接入资格交换后接管同一 EndpointId 的旧连接，配对记录与业务请求 ID 不变。
 
-共享传输 C ABI 的 `status` 读取当前 `handle`，不发送网络请求。快照字段为 `connectionId`、`state`（`connected` / `disconnected`）、`mode`（`direct` / `relay` / `unknown`）、`rttMs`、`remoteAddress`、`error`。模式与往返延迟取自本端当前发送路径；未知路径或断开连接不返回旧延迟。
+共享传输 C ABI 的 `probe` 在 3 秒内通知端点检查网络并请求 `host.status`，用于识别系统挂起后残留的半开连接；超时由客户端合并为一次连接替换。`status` 读取当前 `handle`，不发送网络请求。快照字段为 `connectionId`、`state`（`connected` / `disconnected`）、`mode`（`direct` / `relay` / `unknown`）、`rttMs`、`remoteAddress`、`error`。模式与往返延迟取自本端当前发送路径；未知路径或断开连接不返回旧延迟。

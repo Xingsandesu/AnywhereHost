@@ -11,11 +11,6 @@ on:
         description: Successful main Build packages run ID
         required: true
         type: string
-      stable:
-        description: Publish a new stable version with verified OTA signatures
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -48,7 +43,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id }}
-          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+          STABLE_RELEASE: 'true'
         run: |
           flags=()
           if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi
@@ -103,19 +98,16 @@ jobs:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
         run: python3 Scripts/register-host.py work/AnywhereHost.app "$SOURCE_SHA"
       - name: Prepare pinned Sparkle and OpenSSL tools
-        if: inputs.stable == true
         run: |
           swift package resolve
           echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
       - name: Sign and verify the Sparkle update
-        if: inputs.stable == true
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           archive=$(python3 Scripts/ci-release.py package output notarized)
           python3 Scripts/ota.py sign "$archive" ota-output
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        if: inputs.stable == true
         with:
           name: anywhere-host-ota-${{ needs.source.outputs.sha }}
           path: ota-output/
@@ -158,7 +150,6 @@ jobs:
           name: anywhere-host-macos-arm64-notarized-${{ needs.source.outputs.sha }}
           path: artifacts/notarized
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
-        if: inputs.stable == true
         with:
           name: anywhere-host-ota-${{ needs.source.outputs.sha }}
           path: artifacts/ota
@@ -167,7 +158,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
           BUILD_RUN_ID: ${{ needs.source.outputs.run_id }}
-          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+          STABLE_RELEASE: 'true'
         run: |
           flags=()
           if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi
@@ -177,7 +168,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
           RELEASE_TAG: ${{ steps.packages.outputs.tag }}
-          STABLE_RELEASE: ${{ inputs.stable && 'true' || 'false' }}
+          STABLE_RELEASE: 'true'
         run: |
           flags=()
           if [[ "$STABLE_RELEASE" == true ]]; then flags+=(--stable); fi

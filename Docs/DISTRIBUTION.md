@@ -26,10 +26,12 @@ Scripts/build-app.sh --unsigned
 
 签名、公证与 Gatekeeper 检查通过后，流水线登记代码哈希，成功后才发布。已发布包可用 `Register published Host` 工作流重新登记；接入目录与 OIDC 限制见[网络接入](RELAY.md#发布登记)。
 
-自动 push 构建与预发布交付 macOS 公证安装包。正式版将当前 `main` 成功的 `Build packages` 运行 ID 作为 `build_run_id` 传给 `Sign and release packages`，设置 `stable=true`。发布版本与 Mac 构建号必须高于现有正式版，产物包括公证安装包、Sparkle 更新清单与校验和：
+`main` 的成功 push 构建自动签名、公证并发布正式版，不创建预发布。每次发布必须递增营销版本与 Mac 构建号，并在 CHANGELOG 记录变化；正式版产物包含公证安装包、Sparkle 更新清单与校验和。旧提交或重复版本不得覆盖已发布版本。
+
+手动重跑发布时，将当前 `main` 成功的 `Build packages` 运行 ID 传给 `Sign and release packages`：
 
 ```sh
-gh workflow run release.yml --ref main -f build_run_id="$BUILD_RUN_ID" -f stable=true
+gh workflow run release.yml --ref main -f build_run_id="$BUILD_RUN_ID"
 ```
 
 `Scripts/release.sh` 用于本机准备和发布 Mac 更新包。

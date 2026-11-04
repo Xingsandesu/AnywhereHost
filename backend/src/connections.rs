@@ -10,7 +10,18 @@ pub struct Connections(Arc<Mutex<HashMap<usize, Connection>>>);
 impl Connections {
     pub fn track(&self, connection: &Connection) -> Registration {
         let id = connection.stable_id();
-        self.0.lock().unwrap().insert(id, connection.clone());
+        let mut connections = self.0.lock().unwrap();
+        // All streams from a device multiplex one authenticated connection.
+        // A replacement must retire its predecessor even when a suspended peer
+        // could not send a close packet. Dropping its registration is ID-scoped.
+        connections.retain(|_, previous| {
+            if previous.remote_id() != connection.remote_id() {
+                return true;
+            }
+            previous.close(0u32.into(), b"replaced by device connection");
+            false
+        });
+        connections.insert(id, connection.clone());
         Registration {
             connections: self.clone(),
             id,
