@@ -244,6 +244,9 @@ async fn events(
     let mut rx = state.events.sender.subscribe();
     let mut after = params["after"].as_i64().unwrap_or(0);
     let epoch = params["epoch"].as_str();
+    // Capture a finite replay boundary: a continuously busy task must not starve
+    // the foreground client's acknowledgement by keeping every page nonempty.
+    let mut replay_target = Some(state.events.last_sequence());
     let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
     loop {
         ensure!(state.security.active_owner(owner), "Device revoked");
@@ -275,12 +278,24 @@ async fn events(
             .await??;
             after = event.sequence;
         }
+        if replay_target.is_some_and(|target| after >= target) {
+            tokio::time::timeout(
+                Duration::from_secs(15),
+                write_json(
+                    send,
+                    &json!({"heartbeat":true,"epoch":epoch,"sequence":after}),
+                ),
+            )
+            .await??;
+            replay_target = None;
+            heartbeat.reset();
+        }
         if !page.is_empty() {
             continue;
         }
         tokio::select! {
             _=revoked(&state,owner)=>break,
-            _=heartbeat.tick()=>{tokio::time::timeout(Duration::from_secs(15),write_json(send,&json!({"heartbeat":true}))).await??;},
+            _=heartbeat.tick()=>{tokio::time::timeout(Duration::from_secs(15),write_json(send,&json!({"heartbeat":true,"epoch":epoch,"sequence":after}))).await??;},
             result=rx.recv()=>{if matches!(result,Err(tokio::sync::broadcast::error::RecvError::Closed)){break;}}
         }
     }
@@ -368,11 +383,22 @@ mod tests {
             let (mut send,mut recv)=conn.open_bi().await?;
             write_json(&mut send,&req("events.subscribe",json!({"after":0,"epoch":state.events.epoch()}))).await?;
             let event:Value=serde_json::from_slice(&read_frame(&mut recv).await?)?;assert_eq!(event["sequence"],1);
+            let checkpoint:Value=serde_json::from_slice(&read_frame(&mut recv).await?)?;
+            assert_eq!(checkpoint,json!({"heartbeat":true,"epoch":state.events.epoch(),"sequence":1}));
+            // A second subscription reuses the same connection and acknowledges
+            // exactly the cursor delivered, without repeating prior events.
+            let (mut resumed_send,mut resumed_recv)=conn.open_bi().await?;
+            write_json(&mut resumed_send,&req("events.subscribe",json!({"after":1,"epoch":state.events.epoch()}))).await?;
+            let resumed:Value=serde_json::from_slice(&read_frame(&mut resumed_recv).await?)?;
+            assert_eq!(resumed,checkpoint);
+            state.events.publish(json!({"method":"resumed"}))?;
+            let next:Value=serde_json::from_slice(&read_frame(&mut resumed_recv).await?)?;
+            assert_eq!(next["sequence"],2);
             state.events.invalidate();
             state.events.recover()?;
             loop {
                 let reset:Value=serde_json::from_slice(&read_frame(&mut recv).await?)?;
-                if reset["heartbeat"] == true { continue; }
+                if reset["heartbeat"] == true || reset["sequence"] == 2 { continue; }
                 assert_eq!(reset["error"]["code"],409);
                 break;
             }

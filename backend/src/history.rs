@@ -26,14 +26,14 @@ pub fn normalize(
     params: &Value,
     result: Result<Value, RpcError>,
 ) -> Result<Value, RpcError> {
-    if method == "thread/turns/list"
+    if matches!(method, "thread/turns/list" | "thread/items/list")
         && params["cursor"].is_null()
         && let Some(id) = params["threadId"].as_str()
         && let Err(error) = &result
         && error.code == -32600
         && error.message
             == format!(
-                "thread {id} is not materialized yet; thread/turns/list is unavailable before first user message"
+                "thread {id} is not materialized yet; {method} is unavailable before first user message"
             )
     {
         return Ok(json!({
@@ -80,6 +80,16 @@ mod tests {
         assert!(page["nextCursor"].is_null());
         assert_eq!(page["historyState"], "unmaterialized");
     }
+    #[test]
+    fn item_pages_of_unmaterialized_threads_are_empty_too() {
+        let result = normalize(
+            "thread/items/list", &json!({"threadId":"t"}),
+            Err(RpcError::new(-32600, "thread t is not materialized yet; thread/items/list is unavailable before first user message")),
+        ).unwrap();
+        assert_eq!(result["data"], json!([]));
+        assert_eq!(result["historyState"], "unmaterialized");
+    }
+
     #[test]
     fn unrelated_errors_and_successful_pages_are_preserved() {
         for (method, params, error) in [

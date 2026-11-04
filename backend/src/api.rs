@@ -79,7 +79,10 @@ async fn rpc(s: &Arc<AppState>, mut call: RpcCall) -> Value {
         call.params["sourceKinds"] = json!(["cli", "vscode", "appServer", "exec"]);
     }
     crate::history::bound_page(&call.method, &mut call.params);
-    let history_context = if call.method == "thread/turns/list" {
+    let history_context = if matches!(
+        call.method.as_str(),
+        "thread/turns/list" | "thread/items/list"
+    ) {
         call.params.clone()
     } else {
         Value::Null

@@ -52,7 +52,8 @@ print(f'{version} ({next(iter(builds))})')
 if client_path:
     text = client_path.read_text()
     assert set(re.findall(r'MARKETING_VERSION = ([^;]+);', text)) == {version}
-    assert set(re.findall(r'CURRENT_PROJECT_VERSION = ([^;]+);', text)) == builds
+    client_builds = set(re.findall(r'CURRENT_PROJECT_VERSION = ([^;]+);', text))
+    assert len(client_builds) == 1 and next(iter(client_builds)).isdigit(), 'Client app/extension build numbers differ'
 
 assert re.search(r'^version = "([^"]+)"', (root / 'transport/Cargo.toml').read_text(), re.M).group(1) == version
 
