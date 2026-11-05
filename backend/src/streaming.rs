@@ -11,7 +11,10 @@ pub struct TextOffsets {
 
 enum Position {
     Text(usize),
-    Summaries(Vec<usize>),
+    Reasoning {
+        summaries: Vec<usize>,
+        content: Vec<usize>,
+    },
 }
 
 impl TextOffsets {
@@ -48,15 +51,10 @@ impl TextOffsets {
                         .map_or(0, |command| command.len() + 1)
                         + item["aggregatedOutput"].as_str().unwrap_or("").len(),
                 ),
-                Some("reasoning") => {
-                    Position::Summaries(item["summary"].as_array().map_or_else(Vec::new, |parts| {
-                        parts
-                            .iter()
-                            .take(128)
-                            .map(|part| part.as_str().unwrap_or("").len())
-                            .collect()
-                    }))
-                }
+                Some("reasoning") => Position::Reasoning {
+                    summaries: part_lengths(&item["summary"]),
+                    content: part_lengths(&item["content"]),
+                },
                 _ => return,
             };
             // Bound memory if a runtime never emits completion. Eviction only
@@ -71,21 +69,32 @@ impl TextOffsets {
                 | "item/plan/delta"
                 | "item/commandExecution/outputDelta"
                 | "item/reasoning/summaryTextDelta"
+                | "item/reasoning/textDelta"
         ) {
             let (Some(id), Some(delta)) = (p["itemId"].as_str(), p["delta"].as_str()) else {
                 return;
             };
-            let summary = if method == "item/reasoning/summaryTextDelta" {
-                let Some(index) = p["summaryIndex"].as_u64().filter(|i| *i < 128) else {
+            let part = match method.as_str() {
+                "item/reasoning/summaryTextDelta" => Some(("summaryIndex", "hostSummaryIndex")),
+                "item/reasoning/textDelta" => Some(("contentIndex", "hostContentIndex")),
+                _ => None,
+            };
+            let index = if let Some((field, _)) = part {
+                let Some(index) = p[field].as_u64().filter(|i| *i < 128) else {
                     return;
                 };
                 Some(index as usize)
             } else {
                 None
             };
-            let offset = match (self.items.get_mut(&(thread, turn, id.to_owned())), summary) {
+            let offset = match (self.items.get_mut(&(thread, turn, id.to_owned())), index) {
                 (Some(Position::Text(offset)), None) => offset,
-                (Some(Position::Summaries(parts)), Some(index)) => {
+                (Some(Position::Reasoning { summaries, content }), Some(index)) => {
+                    let parts = if method == "item/reasoning/summaryTextDelta" {
+                        summaries
+                    } else {
+                        content
+                    };
                     parts.resize(parts.len().max(index + 1), 0);
                     &mut parts[index]
                 }
@@ -94,17 +103,59 @@ impl TextOffsets {
             let start = *offset;
             *offset += delta.len();
             p["hostTextOffset"] = Value::from(start);
-            if let Some(index) = summary {
-                p["hostSummaryIndex"] = Value::from(index);
+            if let (Some((_, field)), Some(index)) = (part, index) {
+                p[field] = Value::from(index);
             }
         }
     }
+}
+
+fn part_lengths(value: &Value) -> Vec<usize> {
+    if let Some(text) = value.as_str() {
+        return vec![text.len()];
+    }
+    value.as_array().map_or_else(Vec::new, |parts| {
+        parts
+            .iter()
+            .take(128)
+            .map(|part| {
+                part.as_str()
+                    .or_else(|| part["text"].as_str())
+                    .unwrap_or("")
+                    .len()
+            })
+            .collect()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reasoning_content_and_summary_have_independent_utf8_offsets() {
+        let mut offsets = TextOffsets::default();
+        offsets.annotate(&mut json!({"method":"item/started","params":{"threadId":"t","turnId":"r","item":{"id":"i","type":"reasoning","summary":[{"text":"摘要"}],"content":["你"]}}}));
+        let mut content = json!({"method":"item/reasoning/textDelta","params":{"threadId":"t","turnId":"r","itemId":"i","contentIndex":0,"delta":"好🙂"}});
+        offsets.annotate(&mut content);
+        assert_eq!(content["params"]["hostTextOffset"], 3);
+        assert_eq!(content["params"]["hostContentIndex"], 0);
+        assert!(content["params"]["hostSummaryIndex"].is_null());
+        let mut summary = json!({"method":"item/reasoning/summaryTextDelta","params":{"threadId":"t","turnId":"r","itemId":"i","summaryIndex":0,"delta":"。"}});
+        offsets.annotate(&mut summary);
+        assert_eq!(summary["params"]["hostTextOffset"], 6);
+        content["params"]["contentIndex"] = json!(1);
+        offsets.annotate(&mut content);
+        assert_eq!(content["params"]["hostTextOffset"], 0);
+        content["params"]
+            .as_object_mut()
+            .unwrap()
+            .remove("hostTextOffset");
+        content["params"]["contentIndex"] = json!(-1);
+        offsets.annotate(&mut content);
+        assert!(content["params"]["hostTextOffset"].is_null());
+    }
 
     #[test]
     fn offsets_are_utf8_bytes_and_scoped_to_thread_and_turn() {
