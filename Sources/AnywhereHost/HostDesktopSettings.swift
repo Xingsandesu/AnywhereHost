@@ -6,6 +6,8 @@ struct HostDesktopSettings: View {
     @State private var enabled = false
     @State private var status: JSONValue = .null
     @State private var error: String?
+    @State private var screenAllowed = false
+    @State private var inputAllowed = false
     private var settingsURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appending(path: "AnywhereHost/desktop.json")
@@ -15,17 +17,23 @@ struct HostDesktopSettings: View {
             Form {
                 Section {
                     Toggle("允许已配对设备连接", isOn: Binding(get: { enabled }, set: save))
-                    LabeledContent("屏幕共享", value: status["reachable"].bool ? "可连接" : (enabled ? "不可连接" : "已关闭"))
+                    LabeledContent("原生远程显示", value: status["nativeAvailable"].bool ? "可用" : "请重启 Host")
+                    LabeledContent("屏幕录制", value: screenAllowed ? "已允许" : "需要授权")
+                    LabeledContent("辅助功能", value: inputAllowed ? "已允许" : "需要授权")
                 }
                 Section {
-                    Button("屏幕共享设置", systemImage: "gear") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Sharing-Settings.extension")!)
+                    Button("允许屏幕录制", systemImage: "record.circle") {
+                        CGRequestScreenCaptureAccess()
+                        store.permissions.openSettings(.screenRecording)
+                    }
+                    Button("允许键盘、鼠标和 Pencil 控制", systemImage: "cursorarrow") {
+                        store.permissions.openSettings(.accessibility)
                     }
                     Button("刷新状态", systemImage: "arrow.clockwise") { Task { await refresh() } }
                 }
                 if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             }.formStyle(.grouped)
-        }.frame(width: 480, height: 340)
+        }.frame(width: 480, height: 420)
         .task {
             if let data = try? Data(contentsOf: settingsURL), let settings = try? JSONDecoder().decode(JSONValue.self, from: data) {
                 enabled = settings["enabled"].bool
@@ -43,6 +51,7 @@ struct HostDesktopSettings: View {
         } catch { self.error = error.localizedDescription }
     }
     private func refresh() async {
+        screenAllowed = CGPreflightScreenCaptureAccess(); inputAllowed = AXIsProcessTrusted()
         do {
             guard let client = store.client else { throw HostFailure(message: "主机服务尚未启动") }
             status = try await client.request("desktop.status"); error = nil

@@ -205,16 +205,8 @@ async fn stream_request(
     }
     match request.method.as_str() {
         "events.subscribe" => events(state, &owner, &request.params, &mut send).await?,
-        "desktop.open" => {
-            ensure!(state.desktop.enabled().await, "Desktop sharing disabled");
-            let _permit = state.desktop.slots.clone().try_acquire_owned()?;
-            let mut desktop = state.desktop.connect().await?;
-            write_json(&mut send, &json!({"ready":true})).await?;
-            let (mut read, mut write) = tokio::io::split(&mut desktop);
-            tokio::select! {
-                result=async {tokio::try_join!(tokio::io::copy(&mut recv,&mut write),tokio::io::copy(&mut read,&mut send))?;Ok::<_,anyhow::Error>(())}=>{result?;},
-                _=desktop_disabled(&state,&owner)=>{}
-            }
+        "desktop.native.open" => {
+            crate::desktop::native_session(&state, &owner, &mut send, &mut recv).await?;
         }
         _ => {
             let response = execute(&state, request, &owner, false).await;
@@ -224,11 +216,6 @@ async fn stream_request(
     }
     send.finish()?;
     Ok(())
-}
-async fn desktop_disabled(state: &AppState, owner: &str) {
-    while state.security.active_owner(owner) && state.desktop.enabled().await {
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
 }
 async fn revoked(state: &AppState, owner: &str) {
     while state.security.active_owner(owner) {
@@ -330,7 +317,7 @@ mod tests {
             let desktop_task=tokio::spawn(async move {
                 use tokio::io::{AsyncReadExt,AsyncWriteExt};
                 let (mut tcp,_)=listener.accept().await?;
-                tcp.write_all(b"RFB 003.008\n").await?;
+                tcp.write_all(b"\x00\x00\x00\x08\x01fixture").await?;
                 let mut bytes=[0;4];tcp.read_exact(&mut bytes).await?;assert_eq!(&bytes,b"test");
                 tcp.write_all(b"done").await?;
                 Ok::<_,anyhow::Error>(())
@@ -377,9 +364,9 @@ mod tests {
                 break;
             }
             let (mut desktop_send,mut desktop_recv)=conn.open_bi().await?;
-            write_json(&mut desktop_send,&req("desktop.open",json!({}))).await?;
+            write_json(&mut desktop_send,&req("desktop.native.open",json!({}))).await?;
             let ready:Value=serde_json::from_slice(&read_frame(&mut desktop_recv).await?)?;assert_eq!(ready["ready"],true);
-            let mut greeting=[0;12];desktop_recv.read_exact(&mut greeting).await?;assert_eq!(&greeting,b"RFB 003.008\n");
+            let mut greeting=[0;12];desktop_recv.read_exact(&mut greeting).await?;assert_eq!(&greeting,b"\x00\x00\x00\x08\x01fixture");
             desktop_send.write_all(b"test").await?;
             let mut reply=[0;4];desktop_recv.read_exact(&mut reply).await?;assert_eq!(&reply,b"done");
             desktop_task.await??;

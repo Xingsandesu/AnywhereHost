@@ -1,7 +1,9 @@
 use serde::Deserialize;
 use serde_json::json;
 use std::{path::PathBuf, sync::Arc, time::Duration};
-use tokio::{net::TcpStream, sync::Semaphore};
+#[cfg(test)]
+use tokio::net::TcpStream;
+use tokio::sync::Semaphore;
 
 pub struct Desktop {
     path: PathBuf,
@@ -35,27 +37,74 @@ impl Desktop {
         };
         serde_json::from_slice::<Settings>(&data).is_ok_and(|v| v.enabled)
     }
-
-    async fn reachable(&self) -> bool {
-        self.connect().await.is_ok()
-    }
-
-    pub async fn connect(&self) -> std::io::Result<TcpStream> {
-        let target = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 5900));
-        #[cfg(test)]
-        let target = self.target.unwrap_or(target);
-        let stream =
-            tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(target)).await??;
-        stream.set_nodelay(true)?;
-        Ok(stream)
-    }
 }
 
 pub async fn status(s: &Arc<crate::api::AppState>) -> serde_json::Value {
     let enabled = s.desktop.enabled().await;
-    let platform = json!({"helper":"macOS Screen Sharing"});
-    // Do not create short-lived RFB viewers during an active session.
     let active = 2 - s.desktop.slots.available_permits();
-    let reachable = enabled && (active > 0 || s.desktop.reachable().await);
-    json!({"supported":true,"platform":platform,"reason":null,"enabled":enabled,"reachable":reachable,"protocol":"rfb","engine":"noVNC","activeSessions":active})
+    let available = native_executable().is_some();
+    json!({"supported":true,"enabled":enabled,"reachable":enabled && available,"protocol":"avc-v1","engine":"VideoToolbox","activeSessions":active,"nativeProtocol":"avc-v1","nativeAvailable":available})
+}
+
+/// The GUI executable is selected locally by HostProcess, never supplied by a peer.
+pub fn native_executable() -> Option<PathBuf> {
+    std::env::var_os("ANYWHERE_DESKTOP_EXECUTABLE")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute() && p.is_file())
+}
+
+pub async fn native_session(
+    state: &Arc<crate::api::AppState>,
+    owner: &str,
+    send: &mut iroh::endpoint::SendStream,
+    recv: &mut iroh::endpoint::RecvStream,
+) -> anyhow::Result<()> {
+    use anyhow::{Context, ensure};
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    ensure!(state.desktop.enabled().await, "Desktop sharing disabled");
+    let _permit = state.desktop.slots.clone().try_acquire_owned()?;
+    #[cfg(test)]
+    if let Some(target) = state.desktop.target {
+        let mut fixture = TcpStream::connect(target).await?;
+        anywhere_transport::write_json(send, &json!({"ready":true})).await?;
+        let (mut read, mut write) = tokio::io::split(&mut fixture);
+        tokio::select! {
+            result = tokio::io::copy(recv, &mut write) => { result?; },
+            result = tokio::io::copy(&mut read, send) => { result?; },
+        }
+        return Ok(());
+    }
+    let executable = native_executable().context("Native desktop helper unavailable")?;
+    let mut child = tokio::process::Command::new(executable)
+        .arg("--desktop-session")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+    let mut input = child.stdin.take().context("Desktop input unavailable")?;
+    let mut output = child.stdout.take().context("Desktop output unavailable")?;
+    anywhere_transport::write_json(send, &json!({"ready":true})).await?;
+    // Either half closing ends the session. EOF gives the helper a chance to release keys.
+    let result = tokio::select! {
+        result = tokio::io::copy(recv, &mut input) => result.map(|_| ()),
+        result = tokio::io::copy(&mut output, send) => result.map(|_| ()),
+        _ = async {
+            while state.security.active_owner(owner) && state.desktop.enabled().await {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        } => Ok(()),
+    };
+    drop(output);
+    let _ = input.shutdown().await;
+    drop(input);
+    if tokio::time::timeout(Duration::from_secs(2), child.wait())
+        .await
+        .is_err()
+    {
+        let _ = child.kill().await;
+    }
+    result?;
+    Ok(())
 }

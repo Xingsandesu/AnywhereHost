@@ -24,6 +24,7 @@ final class HostProcess {
         p.currentDirectoryURL = userHome
         let search = ["\(home)/.cargo/bin", "\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]
         environment["PATH"] = search.joined(separator: ":")
+        environment["ANYWHERE_DESKTOP_EXECUTABLE"] = Bundle.main.executableURL?.path
         p.environment = environment
         p.standardOutput = output; p.standardError = output; p.standardInput = FileHandle.nullDevice
         defer { try? output.close() }

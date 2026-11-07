@@ -11,7 +11,7 @@ ALPN 为 `anywhere/0.4`。每个 RPC 或资源请求使用独立双向流；事�
 | `thread.access` | `threadId`；查询修改权限 |
 | `resource.files`、`resource.file`、`resource.image`、`resource.git` | `projectId`、`root`、`path`；根目录从真实项目读取 |
 | `events.subscribe` | `epoch`、`after`；流持续输出事件或 heartbeat |
-| `desktop.status`、`desktop.open` | 桌面状态；open 首次响应 `ready:true` 后传输原始 RFB |
+| `desktop.status`、`desktop.native.open` | 原生远程显示状态；open 首次响应 `ready:true` 后使用 [远程显示协议](REMOTE-DESKTOP.md) |
 | `runtime.connect` | 重新接入本机运行时 |
 | `activity.grant`、`activity.register`、`activity.remove`、`activity.status` | 实时活动授权与订阅 |
 | `pairing.create`、`devices.list`、`devices.revoke` | 仅限本机管理 socket |

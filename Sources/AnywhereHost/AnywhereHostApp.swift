@@ -25,7 +25,7 @@ import CryptoKit
     func applicationWillTerminate(_ notification: Notification) { store.stop() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
-@main struct AnywhereHostApp: App {
+struct AnywhereHostApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
         Window("Anywhere Host", id: "host") {
