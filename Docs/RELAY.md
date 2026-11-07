@@ -58,6 +58,12 @@ Worker Secret `NETWORK_POLICY` 字段：
 
 本机发行使用部署配置 `HOST_RELEASES` 补充目录，其值为 JSON 字符串数组，元素仅含完整 SHA-256 `codeHash` 与 `build`。登记前必须通过 Developer ID、Apple 公证、Gatekeeper 和更新签名验证；代码哈希从最终签名 App 读取。此配置只通过 Cloudflare 管理部署变更，公开登记接口仍要求 GitHub OIDC，App Attest、端点证明及撤销检查保持适用。每次部署保留仍受支持的本机发行条目。
 
+## 临时开发调试
+
+`HOST_DEVELOPMENT_SESSIONS` 为运营者显式配置的限时开发调试授权，默认未配置。它不属于发行目录，也不接受来自 App 或公开登记接口的写入。每项仅含 `codeHash`（完整 SHA-256）、`build`、`keyHash`（既有 App Attest key ID 文本的 SHA-256）、`endpointId` 和 Unix 秒 `expiresAt`；最多 16 项，每个 key／端点组合唯一，最长允许未来 7 天。
+
+仅已用正式 Host 完成登记的 Mac 可使用：签名断言须为 Apple Development 类别 3，代码哈希、现有 App Attest key 与签名端点证明必须同时匹配。开发版不能完成新的 App Attest 登记，iOS 开发断言仍被拒绝。授权不跳过断言签名、计数器、挑战、端点证明或撤销检查；资格有效期不超过调试授权到期时间。到期条目自动失效，移除部署绑定可提前撤销。修改线上授权须明确获得运营者确认，不能把普通开发构建自动加入发行目录。
+
 ## 部署
 
 relay 配置、反向代理和 systemd 单元位于 `Deploy/relay`：

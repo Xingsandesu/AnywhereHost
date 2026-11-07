@@ -1,6 +1,6 @@
 import {randomBytes,createPublicKey,verify,sign} from 'node:crypto';
 import {Store} from './store.js';
-import {releaseIdentity,localReleases} from './releases.js';
+import {releaseIdentity,localReleases,developmentSessions} from './releases.js';
 import {attest,assertion} from './attestation.js';
 import {hash,base64} from './proof.js';
 import {Failure,fields,requireValue,body} from './validation.js';
@@ -63,16 +63,17 @@ export class NetworkAuthority {
       const key=s.get('key:'+input.keyId);
       if(!key || key.role!==input.role || p.revokedKeys.includes(hash(input.keyId)))throw new Failure(403,'AppNotAuthorized');
       const bytes=base64(input.data),message=Buffer.concat([Buffer.from(`Anywhere-Network-v3\n${ISSUER}${path}\n${input.challenge}\n`),bytes]);
-      const count=assertion(input.assertion,message,{...key,hostBuilds});
       let data;try{data=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new Failure(400,'InvalidJSON');}
       fields(data,['endpointId','signature']);requireValue(typeof data.endpointId==='string' && /^[a-f0-9]{64}$/.test(data.endpointId));
+      const developmentBuild=input.role==='host'?developmentSessions(this.env.HOST_DEVELOPMENT_SESSIONS,now).find(b=>b.keyHash===hash(input.keyId) && b.endpointId===data.endpointId && !(p.revokedHostCodeHashes ?? []).includes(b.codeHash)):undefined;
+      const count=assertion(input.assertion,message,{...key,hostBuilds,developmentBuild});
       const publicKey=createPublicKey({key:{kty:'OKP',crv:'Ed25519',x:Buffer.from(data.endpointId,'hex').toString('base64url')},format:'jwk'});
       const proof=`Anywhere-Network-Endpoint-v3\n${ISSUER}\n${input.keyId}\n${input.role}\n${input.challenge}\n${data.endpointId}`;
       if(!verify(null,Buffer.from(proof),publicKey,base64(data.signature,64)))throw new Failure(401,'InvalidEndpointProof');
       const member='member:'+hash(input.keyId)+':'+data.endpointId;
       if(!s.get(member) && s.count('member:'+hash(input.keyId)+':')>=32)throw new Failure(429,'EndpointLimit');
       // The relay and both peers verify this certificate against the endpoint authenticated by iroh.
-      const claims={iss:ISSUER,aud:'anywhere-network-v3',sub:data.endpointId,role:key.role,iat:now,exp:now+900,jti:id(),relays:p.relays};
+      const claims={iss:ISSUER,aud:'anywhere-network-v3',sub:data.endpointId,role:key.role,iat:now,exp:Math.min(now+900,developmentBuild?.expiresAt ?? Infinity),jti:id(),relays:p.relays};
       const encoded=[Buffer.from(JSON.stringify({alg:'EdDSA',typ:'JWT',kid:KID})).toString('base64url'),Buffer.from(JSON.stringify(claims)).toString('base64url')].join('.');
       const token=encoded+'.'+sign(null,Buffer.from(encoded),this.env.NETWORK_SIGNING_KEY).toString('base64url');
       s.transaction(()=>{this.challenge(input,'lease',now);const current=s.get('key:'+input.keyId);if(count<=current.counter)throw new Failure(409,'ReplayRejected');s.update('key:'+input.keyId,{...current,counter:count});s.put(member,true,now+900);s.delete('challenge:'+input.challenge);});

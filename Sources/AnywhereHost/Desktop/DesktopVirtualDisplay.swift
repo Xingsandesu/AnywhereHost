@@ -75,4 +75,34 @@ import ObjectiveC
             throw HostFailure(message: "macOS 拒绝虚拟显示器设置。")
         }
     }
+
+    func waitForHiDPIMode(width: Int, height: Int) async throws {
+        // applySettings publishes both 1x and 2x modes asynchronously. On a
+        // rotation macOS can select the full-pixel 1x mode, shrinking all UI.
+        // Explicitly select the requested pixel size with half-sized points.
+        func matches(_ mode: CGDisplayMode) -> Bool {
+            mode.width == width / 2 && mode.height == height / 2 &&
+            mode.pixelWidth == width && mode.pixelHeight == height
+        }
+        var stableSince: TimeInterval?
+        var lastError: CGError = .success
+        for _ in 0..<100 {
+            if let current = CGDisplayCopyDisplayMode(id), matches(current) {
+                let now = ProcessInfo.processInfo.systemUptime
+                if let stableSince, now - stableSince >= 0.1 { return }
+                if stableSince == nil { stableSince = now }
+            } else {
+                stableSince = nil
+                let options = [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary
+                let modes = CGDisplayCopyAllDisplayModes(id, options) as? [CGDisplayMode] ?? []
+                if let mode = modes.first(where: matches) {
+                    // A mode can be listed before WindowServer accepts it while
+                    // applying new display settings. Refresh and retry boundedly.
+                    lastError = CGDisplaySetDisplayMode(id, mode, nil)
+                }
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        throw HostFailure(message: "扩展屏的 Retina 显示模式未就绪（\(lastError.rawValue)），请重新连接。")
+    }
 }

@@ -3,6 +3,23 @@ import {Failure} from './validation.js';
 const issuer='https://token.actions.githubusercontent.com';
 export const audience='https://connect.jintongshu.com/v3/network/releases';
 let cached;
+// Temporary operator grants for an already enrolled Mac, never public enrollment.
+export function developmentSessions(value,now) {
+  if(value===undefined)return [];
+  try {
+    if(typeof value!=='string' || value.length>16384)throw Error();
+    const sessions=JSON.parse(value),seen=new Set();
+    if(!Array.isArray(sessions) || sessions.length>16)throw Error();
+    for(const s of sessions) {
+      if(!s || Object.keys(s).sort().join(',')!=='build,codeHash,endpointId,expiresAt,keyHash')throw Error();
+      if(!['codeHash','endpointId','keyHash'].every(k=>typeof s[k]==='string' && /^[a-f0-9]{64}$/.test(s[k])))throw Error();
+      if(!Number.isInteger(s.build) || s.build<51 || s.build>=100000000 || !Number.isInteger(s.expiresAt) || s.expiresAt<1 || s.expiresAt>now+7*86400)throw Error();
+      const identity=s.keyHash+':'+s.endpointId;
+      if(seen.has(identity))throw Error();seen.add(identity);
+    }
+    return sessions.filter(s=>s.expiresAt>now);
+  }catch{throw new Failure(503,'DevelopmentGrantUnavailable');}
+}
 // Operator-managed catalog for verified local releases. It is a deployment
 // binding, never supplied by the app or accepted by the public release endpoint.
 export function localReleases(value) {

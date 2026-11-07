@@ -11,7 +11,7 @@ export function decode(value) {
   if (values.length !== 1) throw new Error('InvalidCBOR');
   return values[0];
 }
-export function extensions(authData, offset, role='client', minimumBuild=1, hostBuilds=[]) {
+export function extensions(authData, offset, role='client', minimumBuild=1, hostBuilds=[], developmentBuild) {
   // iOS 27 includes this signed CBOR map even when the ED bit is unset.
   // Apple’s validation-guide fixture encodes the category as UInt32 little-endian bytes.
   if(authData.length<=offset) throw new Error('MissingClientExtensions');
@@ -25,8 +25,9 @@ export function extensions(authData, offset, role='client', minimumBuild=1, host
     const rawType=values.apple_cd_hash_type_01;
     const type=Buffer.isBuffer(rawType) && rawType.length===1 ? rawType[0] : rawType;
     const code=values.apple_cd_hash_hash_01;
-    if(category!==6 || type!==2 || !Buffer.isBuffer(code) || code.length!==32)throw new Error('UnsupportedHostCode');
-    const matches=hostBuilds.filter(b=>b.build>=minimumBuild && b.codeHash===code.toString('hex'));
+    if(type!==2 || !Buffer.isBuffer(code) || code.length!==32)throw new Error('UnsupportedHostCode');
+    const candidates=category===6?hostBuilds:(category===3 && developmentBuild?[developmentBuild]:[]);
+    const matches=candidates.filter(b=>b.build>=minimumBuild && b.codeHash===code.toString('hex'));
     if(matches.length!==1)throw new Error('UnapprovedHostBuild');
     if(version!==undefined && version!==String(matches[0].build))throw new Error('HostBuildMismatch');
   } else if(![2,4].includes(category) || typeof version!=='string' || !/^[0-9]{1,8}$/.test(version) || Number(version)<minimumBuild)throw new Error('UnsupportedClient');
@@ -64,7 +65,7 @@ export function assertion(value, data, client) {
     const bytes = base64(value);
     const decoded = decode(bytes);
     if (!Buffer.isBuffer(decoded.signature) || !Buffer.isBuffer(decoded.authenticatorData) || decoded.authenticatorData.length < 37) throw new Error();
-    extensions(decoded.authenticatorData,37,client.role,client.minimumBuild ?? 1,client.hostBuilds ?? []);
+    extensions(decoded.authenticatorData,37,client.role,client.minimumBuild ?? 1,client.hostBuilds ?? [],client.developmentBuild);
     return verifyAssertion({assertion:bytes,payload:data,publicKey:client.publicKey,signCount:client.counter,...apps[client.role ?? 'client']}).signCount;
   } catch { throw new Failure(401,'InvalidAssertion'); }
 }

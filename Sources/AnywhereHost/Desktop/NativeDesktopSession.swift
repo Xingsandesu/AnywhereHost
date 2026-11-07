@@ -7,6 +7,8 @@ import ScreenCaptureKit
     private var encoder: DesktopEncoder?
     private var virtualDisplay: DesktopVirtualDisplay?
     private let input = DesktopInput()
+    private var nativeTouch: DesktopNativeTouch?
+    private var touchAuthorizationMonitor: Task<Void, Never>?
     private var started = false
     private var videoGeneration = 0
     private var captureSize = CGSize.zero
@@ -47,7 +49,14 @@ import ScreenCaptureKit
                 if value["generation"] as? Int == videoGeneration { encoder?.acknowledge() }
             }
             else if value["event"] as? String == "resize" { try await configureCapture(value) }
-            else if started { input.receive(value) }
+            else if value["event"] as? String == "touch" {
+                guard let nativeTouch else { throw HostFailure(message: "此会话没有启用原生触控。") }
+                try await nativeTouch.receive(payload)
+            }
+            else if started {
+                if value["event"] as? String == "release" { try await nativeTouch?.release() }
+                input.receive(value)
+            }
         } catch {
             try? DesktopOutput.shared.write(4, Data(error.localizedDescription.utf8))
             finish()
@@ -60,31 +69,52 @@ import ScreenCaptureKit
             let size = Self.requestedSize(options, extended: true)
             virtualDisplay = try DesktopVirtualDisplay(width: Int(size.width), height: Int(size.height))
         }
+        if options["touchProtocol"] as? String == DesktopNativeTouch.protocolName {
+            guard DesktopTouchAuthorization.isEnabled else {
+                throw HostFailure(message: "请在 Mac 的 Anywhere Host → 远程桌面中检测并启用虚拟触屏。")
+            }
+            nativeTouch = try await DesktopNativeTouch.open(displayID: virtualDisplay?.id ?? CGMainDisplayID())
+            try DesktopOutput.shared.write(5, JSONSerialization.data(withJSONObject: ["touchProtocol": DesktopNativeTouch.protocolName]))
+            touchAuthorizationMonitor = Task { [weak self] in
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                    guard let self else { return }
+                    if !DesktopTouchAuthorization.isEnabled {
+                        try? DesktopOutput.shared.write(4, Data("Mac 已撤销原生触控授权。".utf8))
+                        finish(); return
+                    }
+                }
+            }
+        }
         try await configureCapture(options)
     }
     static func requestedSize(_ options: [String: Any], extended: Bool) -> CGSize {
-        var width = Double(min(3840, max(640, options["width"] as? Int ?? 2560)))
-        var height = Double(min(2880, max(480, options["height"] as? Int ?? 1600)))
+        var width = Double(max(2, options["width"] as? Int ?? 2560))
+        var height = Double(max(2, options["height"] as? Int ?? 1600))
         if extended {
             // Keep the client's aspect ratio while meeting macOS's HiDPI mode minimum.
             let grow = max(1, 1600 / width, 1200 / height)
             width *= grow; height *= grow
-            let shrink = min(1, 3840 / width, 2880 / height)
-            width *= shrink; height *= shrink
         }
-        return CGSize(width: Int(width) / 2 * 2, height: Int(height) / 2 * 2)
+        let shrink = min(1, 3840 / width, 2880 / height)
+        width *= shrink; height *= shrink
+        return CGSize(width: max(2, Int(width) / 2 * 2), height: max(2, Int(height) / 2 * 2))
     }
     private func configureCapture(_ options: [String: Any]) async throws {
         let size = Self.requestedSize(options, extended: virtualDisplay != nil)
         guard size != captureSize else { return }
         input.release()
+        try await nativeTouch?.release()
         if let previous = stream {
             stream = nil
             try await previous.stopCapture()
             if let encoder { try previous.removeStreamOutput(encoder, type: .screen); encoder.stop() }
             encoder = nil
         }
-        if let virtualDisplay { try virtualDisplay.resize(width: Int(size.width), height: Int(size.height)) }
+        if let virtualDisplay {
+            try virtualDisplay.resize(width: Int(size.width), height: Int(size.height))
+            try await virtualDisplay.waitForHiDPIMode(width: Int(size.width), height: Int(size.height))
+        }
         let displayID = virtualDisplay?.id ?? CGMainDisplayID()
         var content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         for _ in 0..<20 where !content.displays.contains(where: { $0.displayID == displayID }) {
@@ -105,6 +135,7 @@ import ScreenCaptureKit
         configuration.queueDepth = 3; configuration.showsCursor = true
         configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         configuration.colorSpaceName = CGColorSpace.sRGB
+        configuration.colorMatrix = CGDisplayStream.yCbCrMatrix_ITU_R_709_2
         let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: configuration, delegate: self)
         self.stream = stream
         try stream.addStreamOutput(encoder, type: .screen, sampleHandlerQueue: encoder.queue)
@@ -120,6 +151,8 @@ import ScreenCaptureKit
         }
     }
     func finish() {
+        touchAuthorizationMonitor?.cancel()
+        nativeTouch?.close(); nativeTouch = nil
         input.release()
         virtualDisplay = nil
         // Process exit also tears down capture/codec if stdout is blocked.
@@ -130,6 +163,7 @@ import ScreenCaptureKit
 @main enum AnywhereHostEntry {
     @MainActor static func main() {
         if ProcessInfo.processInfo.arguments.contains("--desktop-session") { NativeDesktopSession.run() }
+        else if ProcessInfo.processInfo.arguments.contains("--verify-native-touch") { DesktopNativeTouchProbe.run() }
         else { AnywhereHostApp.main() }
     }
 }

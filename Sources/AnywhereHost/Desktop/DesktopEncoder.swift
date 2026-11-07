@@ -20,10 +20,14 @@ final class DesktopEncoder: NSObject, SCStreamOutput, @unchecked Sendable {
         self.width = width; self.height = height
         super.init()
         let status = VTCompressionSessionCreate(allocator: nil, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264,
-            encoderSpecification: [kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: true] as CFDictionary,
-            imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: { ref, _, status, _, sample in
+            encoderSpecification: [kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: true,
+                                   kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true] as CFDictionary,
+            imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: { ref, _, status, flags, sample in
                 guard let ref else { return }
                 let owner = Unmanaged<DesktopEncoder>.fromOpaque(ref).takeUnretainedValue()
+                if status == noErr && flags.contains(.frameDropped) {
+                    owner.acknowledge(); return
+                }
                 guard status == noErr, let sample else { owner.failed("硬件视频编码失败：\(status)"); return }
                 owner.write(sample)
             }, refcon: Unmanaged.passUnretained(self).toOpaque(), compressionSessionOut: &encoder)
@@ -31,6 +35,9 @@ final class DesktopEncoder: NSObject, SCStreamOutput, @unchecked Sendable {
         for (key, value): (CFString, CFTypeRef) in [
             (kVTCompressionPropertyKey_RealTime, kCFBooleanTrue),
             (kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse),
+            (kVTCompressionPropertyKey_ColorPrimaries, kCVImageBufferColorPrimaries_ITU_R_709_2),
+            (kVTCompressionPropertyKey_TransferFunction, kCVImageBufferTransferFunction_sRGB),
+            (kVTCompressionPropertyKey_YCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_709_2),
             (kVTCompressionPropertyKey_ProfileLevel, kVTProfileLevel_H264_High_AutoLevel),
             (kVTCompressionPropertyKey_ExpectedFrameRate, 60 as CFNumber),
             (kVTCompressionPropertyKey_MaxKeyFrameInterval, 60 as CFNumber),
@@ -38,7 +45,7 @@ final class DesktopEncoder: NSObject, SCStreamOutput, @unchecked Sendable {
             (kVTCompressionPropertyKey_AverageBitRate, min(40_000_000, max(8_000_000, width * height * 6)) as CFNumber)
         ] {
             let result = VTSessionSetProperty(encoder, key: key, value: value)
-            guard result == noErr else { throw HostFailure(message: "视频编码设置失败：\(result)") }
+            guard result == noErr else { throw HostFailure(message: "视频编码设置失败（\(key)）：\(result)") }
         }
         guard VTCompressionSessionPrepareToEncodeFrames(encoder) == noErr else { throw HostFailure(message: "视频编码器未就绪。") }
     }
@@ -49,7 +56,10 @@ final class DesktopEncoder: NSObject, SCStreamOutput, @unchecked Sendable {
         }
     }
     func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen else { return }
+        guard type == .screen,
+              let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let status = attachments.first?[.status] as? Int,
+              status == SCFrameStatus.complete.rawValue else { return }
         encode(sample)
     }
     func encode(_ sample: CMSampleBuffer) {
@@ -98,7 +108,7 @@ final class DesktopEncoder: NSObject, SCStreamOutput, @unchecked Sendable {
         lock.withLock { stopped = true }
         queue.sync {
             if let encoder { VTCompressionSessionInvalidate(encoder) }
-            encoder = nil
+            encoder = nil; latestSample = nil
         }
     }
 }

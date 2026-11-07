@@ -13,7 +13,9 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('app', type=pathlib.Path)
 parser.add_argument('--integration', action='store_true')
 parser.add_argument('--unsigned', action='store_true', help='Check CI bundle structure/architecture only; no signing assurance')
+parser.add_argument('--development', action='store_true', help='Verify a registered-device development build; not distribution assurance')
 args = parser.parse_args()
+assert not (args.unsigned and args.development), 'Choose unsigned or development verification'
 app = args.app.resolve()
 if not args.unsigned:
     subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
@@ -21,7 +23,11 @@ assert (app / 'Contents/Frameworks/Sparkle.framework').exists(), 'Missing OTA fr
 profile = None
 if not args.unsigned:
     profile = plistlib.loads(subprocess.check_output(['security', 'cms', '-D', '-i', str(app / 'Contents/embedded.provisionprofile')]))
-    assert profile.get('ProvisionsAllDevices') is True, 'Developer ID profile required'
+    if args.development:
+        assert profile.get('ProvisionedDevices'), 'Registered-device development profile required'
+        assert profile.get('Platform') == ['OSX'], 'macOS development profile required'
+    else:
+        assert profile.get('ProvisionsAllDevices') is True, 'Developer ID profile required'
     assert profile['ExpirationDate'] > datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None), 'Expired provisioning profile'
     assert profile['TeamIdentifier'] == ['775Y7KV7KU'], 'Unexpected profile team'
     assert profile['Entitlements']['com.apple.application-identifier'] == '775Y7KV7KU.com.jintongshu.AnywhereHost', 'Unexpected profile application'
@@ -43,6 +49,8 @@ for name in ('AnywhereHost', 'anywhere-host', 'anywhere-permission-probe'):
         continue
     subprocess.run(['codesign', '--verify', '--strict', str(executable)], check=True)
     signature = subprocess.run(['codesign', '-d', '--verbose=4', str(executable)], capture_output=True, check=True)
+    if args.development:
+        assert b'Authority=Apple Development:' in signature.stderr, 'Apple Development signing certificate required'
     assert b'runtime' in signature.stderr, f'{name} must retain Hardened Runtime'
     result = subprocess.run(['codesign', '-d', '--entitlements', ':-', str(executable)], capture_output=True, check=True)
     entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
@@ -57,6 +65,8 @@ for name in ('AnywhereHost', 'anywhere-host', 'anywhere-permission-probe'):
         for key in ('com.apple.application-identifier', 'com.apple.developer.team-identifier', 'com.apple.developer.devicecheck.app-attest-opt-in'):
             assert entitlements.get(key) == profile['Entitlements'].get(key), f'Profile entitlement mismatch: {key}'
         assert entitlements.get('com.apple.security.automation.apple-events'), 'Host is missing Apple Events consent entitlement'
+        if entitlements.get('com.apple.developer.hid.virtual.device'):
+            assert profile['Entitlements'].get('com.apple.developer.hid.virtual.device') is True, 'HID signature permission is not granted by profile'
         framework_signature = subprocess.run(['codesign', '-d', '--verbose=4', str(app / 'Contents/Frameworks/Sparkle.framework')], capture_output=True, check=True)
         def team(output):
             return next((line for line in output.splitlines() if line.startswith(b'TeamIdentifier=')), b'')

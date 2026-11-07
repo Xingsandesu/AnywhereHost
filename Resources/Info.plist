@@ -11,6 +11,7 @@
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>LSMinimumSystemVersion</key><string>27.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSIsTouchNative</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
 <key>ITSAppUsesNonExemptEncryption</key><false/>

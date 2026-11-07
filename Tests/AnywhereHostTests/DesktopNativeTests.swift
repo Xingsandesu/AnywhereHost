@@ -76,9 +76,9 @@ struct DesktopNativeTests {
         #expect(events.last?.location == point)
     }
     @Test func foldingKeepsViewportAspectAndCodecBounds() {
-        for (width, height) in [(820, 1550), (1790, 1260), (1260, 1790), (4000, 3000)] {
+        for (width, height) in [(820, 1550), (1790, 1260), (1260, 1790), (4000, 3000), (1290, 2796), (2400, 5400)] {
             let size = NativeDesktopSession.requestedSize(["width": width, "height": height], extended: true)
-            let expectedRatio = Double(min(3840, width)) / Double(min(2880, height))
+            let expectedRatio = Double(width) / Double(height)
             #expect(abs(size.width / size.height - expectedRatio) < 0.003)
             #expect(size.width <= 3840 && size.height <= 2880)
             #expect(Int(size.width) % 2 == 0 && Int(size.height) % 2 == 0)
