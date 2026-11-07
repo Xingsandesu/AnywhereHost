@@ -34,4 +34,16 @@ gh workflow run release.yml --ref main -f build_run_id="$BUILD_RUN_ID" -f stable
 
 `Scripts/release.sh` 用于本机准备和发布 Mac 更新包。
 
+本机没有 Developer ID 私钥时，可通过 Xcode 已登录且获授权的团队执行自动发行签名。使用 `asc xcode archive` 归档，传入 `CODE_SIGN_STYLE=Automatic`、`CODE_SIGN_IDENTITY=Apple Development`、`DEVELOPMENT_TEAM=775Y7KV7KU` 与 `-allowProvisioningUpdates`；导出 `.app`：
+
+```sh
+xcodebuild -exportArchive -archivePath /tmp/AnywhereHost.xcarchive \
+  -exportPath /tmp/AnywhereHost-export \
+  -exportOptionsPlist Scripts/DeveloperIDExportOptions.plist -allowProvisioningUpdates
+```
+
+将导出 App 压缩后执行 `asc notarization submit --file 包路径 --wait`，成功后使用 `xcrun stapler staple`、`xcrun stapler validate` 与 `spctl --assess --type execute` 验证 App。按[本机发行登记](RELAY.md#发布登记)配置最终代码哈希并实测生产接入，再以 `ANYWHERE_RELEASE_APP` 指向此 App 执行 `Scripts/release.sh --publish`。
+
+Sparkle 私钥保存在钥匙串账户 `com.jintongshu.AnywhereHost`，公钥须与 App 匹配。轮换时设置 `ANYWHERE_PREVIOUS_APP` 指向已安装的旧正式版；更新验证会检查旧版指定的 Apple 签名身份、新版 Ed25519 签名和递增构建号。GitHub 的 `SPARKLE_PRIVATE_KEY` 也须同步，私钥不进入仓库或日志。
+
 iOS 客户端要求 iOS 27.1+，通过 Git 子模块固定共享传输源码。版本检查与测试见[贡献指南](../CONTRIBUTING.md)。

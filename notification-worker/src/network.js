@@ -1,6 +1,6 @@
 import {randomBytes,createPublicKey,verify,sign} from 'node:crypto';
 import {Store} from './store.js';
-import {releaseIdentity} from './releases.js';
+import {releaseIdentity,localReleases} from './releases.js';
 import {attest,assertion} from './attestation.js';
 import {hash,base64} from './proof.js';
 import {Failure,fields,requireValue,body} from './validation.js';
@@ -14,7 +14,7 @@ export function settings(env) {
   requireValue(Array.isArray(p.hostBuilds ?? []) && (p.hostBuilds ?? []).length<=256 && (p.hostBuilds ?? []).every(b=>b && /^[a-f0-9]{64}$/.test(b.codeHash) && Number.isInteger(b.build) && b.build>=51) && Array.isArray(p.revokedHostCodeHashes ?? []) && (p.revokedHostCodeHashes ?? []).length<=10000 && (p.revokedHostCodeHashes ?? []).every(h=>/^[a-f0-9]{64}$/.test(h)));
   if(p.disabled)throw new Failure(503,'NetworkDisabled');
   for(const url of p.relays) {const u=new URL(url);requireValue(u.protocol==='https:' && !u.username && !u.password && !u.search && !u.hash && u.pathname==='/');}
-  return p;
+  return {...p,hostBuilds:[...(p.hostBuilds ?? []),...localReleases(env.HOST_RELEASES)]};
 }
 export class NetworkAuthority {
   constructor(storage,env) {this.store=new Store(storage);this.env=env;}

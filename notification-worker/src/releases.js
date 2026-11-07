@@ -3,6 +3,22 @@ import {Failure} from './validation.js';
 const issuer='https://token.actions.githubusercontent.com';
 export const audience='https://connect.jintongshu.com/v3/network/releases';
 let cached;
+// Operator-managed catalog for verified local releases. It is a deployment
+// binding, never supplied by the app or accepted by the public release endpoint.
+export function localReleases(value) {
+  if(value===undefined)return [];
+  try {
+    if(typeof value!=='string' || value.length>65536)throw Error();
+    const builds=JSON.parse(value);
+    if(!Array.isArray(builds) || builds.length>256)throw Error();
+    const hashes=new Set();
+    for(const b of builds) {
+      if(!b || Object.keys(b).length!==2 || typeof b.codeHash!=='string' || !/^[a-f0-9]{64}$/.test(b.codeHash) || !Number.isInteger(b.build) || b.build<51 || b.build>=100000000 || hashes.has(b.codeHash))throw Error();
+      hashes.add(b.codeHash);
+    }
+    return builds;
+  }catch {throw new Failure(503,'ReleaseCatalogUnavailable');}
+}
 export function verifyReleaseToken(token,keys,now) {
   try {
     if(typeof token!=='string' || token.length>16384)throw Error();

@@ -4,7 +4,12 @@
   "main": "src/index.js",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
-  "routes": [{"pattern":"connect.jintongshu.com","custom_domain":true}],
+  "routes": [
+    {
+      "pattern": "connect.jintongshu.com",
+      "custom_domain": true
+    }
+  ],
   "preview_urls": false,
   "observability": {
     "enabled": false
@@ -37,5 +42,8 @@
         "RelayAuthority"
       ]
     }
-  ]
+  ],
+  "vars": {
+    "HOST_RELEASES": "[{\"codeHash\":\"0827ff26127379d42e7ba6a0ea6195c35a27077a2ee0ecc94f5f1ce0cf4810de\",\"build\":57}]"
+  }
 }

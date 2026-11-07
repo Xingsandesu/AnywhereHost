@@ -56,6 +56,8 @@ Worker Secret `NETWORK_POLICY` 字段：
 
 发布目录保存在 Durable Object，最多 256 项；达到上限须移除停用产物。撤销列表同时约束初始化目录和自动登记目录。
 
+本机发行使用部署配置 `HOST_RELEASES` 补充目录，其值为 JSON 字符串数组，元素仅含完整 SHA-256 `codeHash` 与 `build`。登记前必须通过 Developer ID、Apple 公证、Gatekeeper 和更新签名验证；代码哈希从最终签名 App 读取。此配置只通过 Cloudflare 管理部署变更，公开登记接口仍要求 GitHub OIDC，App Attest、端点证明及撤销检查保持适用。每次部署保留仍受支持的本机发行条目。
+
 ## 部署
 
 relay 配置、反向代理和 systemd 单元位于 `Deploy/relay`：

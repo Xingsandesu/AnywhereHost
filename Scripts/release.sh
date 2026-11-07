@@ -11,8 +11,10 @@ if [[ "${1:-}" == "--publish" ]]; then
   python3 Scripts/ci-release.py notes "$(python3 Scripts/version.py | cut -d ' ' -f 1)" >/dev/null
 fi
 python3 Scripts/version.py
-APP="$ROOT/dist/AnywhereHost.app"
+APP="${ANYWHERE_RELEASE_APP:-$ROOT/dist/AnywhereHost.app}"
 python3 Scripts/verify-app.py "$APP"
+xcrun stapler validate "$APP"
+spctl --assess --type execute --verbose=2 "$APP"
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")
 BUILD=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist")
 [[ "$(python3 Scripts/version.py)" == "$VERSION ($BUILD)" ]] || { printf 'Rebuild the app after changing version.\n' >&2; exit 1; }
@@ -25,18 +27,21 @@ PUBLIC_KEY=$(/usr/libexec/PlistBuddy -c 'Print SUPublicEDKey' "$APP/Contents/Inf
 OUTPUT="$ROOT/dist/releases/$TAG"
 [[ ! -e "$OUTPUT" ]] || { printf 'Release output already exists: %s\n' "$OUTPUT" >&2; exit 1; }
 mkdir -p "$OUTPUT"
-ARCHIVE="AnywhereHost-$VERSION-arm64.zip"
+ARCHIVE="AnywhereHost-$VERSION-macos-arm64-notarized.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUTPUT/$ARCHIVE"
-"$TOOLS/generate_appcast" --account com.jintongshu.AnywhereHost --maximum-deltas 0 \
+"$TOOLS/generate_appcast" --account com.jintongshu.AnywhereHost --maximum-deltas 0 --maximum-versions 1 --minimum-update-version 8 \
   --download-url-prefix "https://github.com/$REPO/releases/download/$TAG/" "$OUTPUT"
 (cd "$OUTPUT" && shasum -a 256 "$ARCHIVE" appcast.xml > SHA256SUMS)
-python3 Scripts/verify-update.py "$OUTPUT/appcast.xml" "$OUTPUT/$ARCHIVE"
+python3 Scripts/ota.py verify "$OUTPUT/$ARCHIVE" "$OUTPUT" --tag "$TAG"
+VERIFY_OPTIONS=()
+if [[ -n "${ANYWHERE_PREVIOUS_APP:-}" ]]; then VERIFY_OPTIONS+=(--previous-app "$ANYWHERE_PREVIOUS_APP"); fi
+python3 Scripts/verify-update.py "$OUTPUT/appcast.xml" "$OUTPUT/$ARCHIVE" "${VERIFY_OPTIONS[@]}"
 if [[ "${1:-}" == "--publish" ]]; then
   [[ -z "$(git status --porcelain)" ]] || { printf 'Commit source changes before publishing.\n' >&2; exit 1; }
   python3 Scripts/ci-release.py notes "$VERSION" > "$OUTPUT/notes.md"
-  git tag "$TAG"
-  git push origin HEAD:main "$TAG"
-  gh release create "$TAG" --repo "$REPO" --verify-tag --title "AnywhereHost $VERSION ($BUILD)" \
-    --notes-file "$OUTPUT/notes.md" "$OUTPUT/$ARCHIVE" "$OUTPUT/appcast.xml" "$OUTPUT/SHA256SUMS"
+  SOURCE_SHA=$(git rev-parse HEAD)
+  printf '\nSource commit: `%s`\n\nBuilt locally with Xcode; Developer ID, Apple notarization, Gatekeeper and Sparkle signatures verified.\n' "$SOURCE_SHA" >> "$OUTPUT/notes.md"
+  git push origin HEAD:main
+  GITHUB_REPOSITORY="$REPO" python3 Scripts/ci-release.py publish "$OUTPUT" "$TAG" "$SOURCE_SHA" --stable
 fi
 printf 'Prepared %s\n' "$OUTPUT"
