@@ -44,6 +44,6 @@
     }
   ],
   "vars": {
-    "HOST_RELEASES": "[{\"codeHash\":\"0827ff26127379d42e7ba6a0ea6195c35a27077a2ee0ecc94f5f1ce0cf4810de\",\"build\":57}]"
+    "HOST_RELEASES": "[{\"codeHash\":\"0827ff26127379d42e7ba6a0ea6195c35a27077a2ee0ecc94f5f1ce0cf4810de\",\"build\":57},{\"codeHash\":\"8a2865d383ca17321400ebe5b9fb9342532b0a33ffb5060a9227056ba377a5a7\",\"build\":58}]"
   }
 }
