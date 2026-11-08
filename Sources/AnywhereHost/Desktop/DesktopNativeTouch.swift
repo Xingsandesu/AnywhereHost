@@ -29,7 +29,20 @@ import CoreHID
         // Verify report submission as well as object allocation. This is not proof
         // of AppKit direct-touch delivery; that requires a receiver integration test.
         try await touch.release()
-        return touch
+        // Registration and report submission can precede AppKit's capability
+        // update. Do not acknowledge a touch session before the system sees it.
+        // This capability may be global on some OS versions; receiver tests
+        // remain necessary to prove delivery to the intended display.
+        for _ in 0..<100 {
+            guard !Task.isCancelled else { touch.close(); throw CancellationError() }
+            if NSScreen.screens.contains(where: {
+                ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID &&
+                $0.touchCapabilities.contains(.multiTouch)
+            }) { return touch }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        touch.close()
+        throw HostFailure(message: "虚拟触屏已注册，但 macOS 尚未启用显示器的原生多点触控能力。请重新连接。")
     }
     func receive(_ payload: Data) async throws {
         guard let device else { throw HostFailure(message: "虚拟触屏已经断开。") }

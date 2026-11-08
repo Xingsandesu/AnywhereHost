@@ -24,7 +24,7 @@ Rust 后端只启动本机 GUI 进程通过 `ANYWHERE_DESKTOP_EXECUTABLE` 指定
 
 ## 原生多点触控
 
-原生触控使用 [CoreHID.HIDVirtualDevice](https://developer.apple.com/documentation/corehid/hidvirtualdevice) 创建 HID Digitizers / Touch Screen 设备，通过 `displayUUID`、`CGDirectDisplayID` 和 `DisplayIntegrated` 绑定会话显示器，启用 `DigitizerCollectionDispatch` 多触点报告，经系统自带 HID 驱动递交触点报告。没有单独安装 DriverKit 扩展。设备注册成功不等于 AppKit 已接收直接触点；本机设置只有在专用临时显示器上的独立窗口收到多个 `.direct` 触点的开始、移动、结束和取消后才保存启用状态。
+原生触控使用 [CoreHID.HIDVirtualDevice](https://developer.apple.com/documentation/corehid/hidvirtualdevice) 创建 HID Digitizers / Touch Screen 设备，通过 `displayUUID`、`CGDirectDisplayID` 和 `DisplayIntegrated` 绑定会话显示器，启用 `DigitizerCollectionDispatch` 多触点报告，经系统自带 HID 驱动递交触点报告。没有单独安装 DriverKit 扩展。设备注册后等待目标 `NSScreen.touchCapabilities` 包含 `.multiTouch`，最多两秒，超时不发送触控协议确认。该能力位在部分系统版本可能反映全局触屏状态，不能单独证明显示器绑定正确。设备注册成功不等于 AppKit 已接收直接触点；本机设置只有在专用临时显示器上的独立窗口收到多个 `.direct` 触点的开始、移动、结束和取消后才保存启用状态。
 
 macOS 27 的直接触点、十指独立生命周期、取消后重用触点，以及原生 `NSButton`、`NSScrollView`、缩放和旋转识别器均由验证程序检查。扩展显示器支持横竖屏切换。启用前的检测使用当前 Host 自身签名，不以设备对象创建成功代替实际事件接收。
 
@@ -80,3 +80,17 @@ macOS 27 的直接触摸由 AppKit 手势识别器接收，不能仅将 `CGEvent
 系统 `SidecarDisplayAgent` 导入的发送接口包含 `UniversalHID.HIDReportDispatcher.setInputDevices(_:for:)` 和 `dispatchReport(_:from:)`。检查框架的属性实现确认：Swift `displayIdentifier` 对应的实际 HID 属性键是 **`displayUUID`**，不是 `DisplayIdentifier`；绑定错误时即便设备注册和报告提交成功，AppKit 也收不到直接触点。产品通过 CoreHID 和系统 HID 驱动实现相同的显示器绑定，不调用未发布的 Swift 类型布局。
 
 Apple 的 [IOHIDEventDriver 源码](https://github.com/apple-oss-distributions/IOHIDFamily/blob/main/IOHIDFamily/IOHIDEventDriver.cpp) 定义了 Digitizer Collection 的组合与 Touch + Untouch 取消语义。[IOHIDResourceUserClient 源码](https://github.com/apple-oss-distributions/IOHIDFamily/blob/main/IOHIDFamily/IOHIDResourceUserClient.cpp) 定义了虚拟设备权限检查。该路径无需 `com.apple.private.hid.client.admin`、内核扩展或关闭系统保护。
+
+### 原生控件与显示能力
+
+使用同一份授权签名的探针验证系统控件，无需修改 Mac 型号、Apple 厂商标识或目标应用：
+
+```sh
+/tmp/AnywhereTouchProbe.app/Contents/MacOS/AnywhereTouchProbe --adaptive-controls --extended
+```
+
+此模式输出运行时 OS 版本、HID 注册前后的 `NSScreen.touchCapabilities` 和显示器 EDR 上限，并在横竖屏分别检查原生 `NSSwitch`、`NSSlider`、`NSStepper` 的数值变化和 action。只发送直接 HID 触点，不手动扩大控件、不合成鼠标、不覆盖 AppKit 方法。输出中的 `OBSERVE` 记录按下前后控件外框与新增可见窗口；控件 action 的 `PASS` **不代表**视觉扩展通过，外框不变也不能排除控件内部绘制变化。动态放大需在目标 OS 上观察实际渲染。
+
+Apple 的 [Touch on Mac 开发说明](https://developer.apple.com/videos/play/tech-talks/111468/) 与[设计说明](https://developer.apple.com/videos/play/tech-talks/111456/)区分原生控件、自定义控件和兼容鼠标路径。目标应用的 `NSIsTouchNative` 与事件处理方式属于接收应用，Host 无法仅靠改变设备型号让所有第三方应用采用原生控件逻辑。
+
+触摸能力与 HDR 独立。当前协议仅传输 8-bit sRGB H.264，虚拟显示器不声明 PROLED、HDR 或 120 Hz。`CGVirtualDisplayMode` 的私有 `transferFunction`、`CGVirtualDisplayDescriptor` 的 `setDisplayInfoValue:forKey:` 是否存在，不代表其取值语义、HDR 编码与客户端呈现已验证；不得仅写入显示器身份或色域元数据就宣称具备 HDR。端到端 HDR 需要显示能力协商、采集格式、编码位深、色彩元数据和客户端 EDR 呈现共同实现。

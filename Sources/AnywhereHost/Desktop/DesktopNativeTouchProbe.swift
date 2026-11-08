@@ -2,7 +2,7 @@ import AppKit
 
 /// Only dispatches digitizer reports, into a window owned by this verifier.
 @MainActor enum DesktopNativeTouchProbe {
-    static func verify(displayID requestedDisplay: CGDirectDisplayID? = nil, gestures: Bool = false) async throws {
+    static func verify(displayID requestedDisplay: CGDirectDisplayID? = nil, gestures: Bool = false, adaptiveControls: Bool = false) async throws {
         // Use an owned display by default so another app's floating windows and
         // system overlays cannot intercept the verification contacts.
         let ownedDisplay = try requestedDisplay == nil ? DesktopVirtualDisplay(width: 1600, height: 1200) : nil
@@ -12,6 +12,7 @@ import AppKit
         guard let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID }) else {
             throw HostFailure(message: "触控验证显示器尚未就绪。")
         }
+        print("DISPLAY before HID touchCapabilities=\(screen.touchCapabilities.rawValue) EDR=\(screen.maximumPotentialExtendedDynamicRangeColorComponentValue)")
         let device = try await DesktopNativeTouch.open(displayID: displayID)
         defer { device.close() }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
@@ -27,6 +28,12 @@ import AppKit
             try await Task.sleep(for: .milliseconds(100))
         }
         try await Task.sleep(for: .milliseconds(300))
+        let activeScreen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID }
+        print("DISPLAY after HID touchCapabilities=\(activeScreen?.touchCapabilities.rawValue ?? 0)")
+        if adaptiveControls {
+            try await verifyAdaptiveControls(driver)
+            return
+        }
         try await verifyContacts(driver, count: 2)
         try await verifyCancellation(driver)
         if gestures {
@@ -121,23 +128,60 @@ import AppKit
         print("PASS native rotation \(observer.rotation) degrees")
     }
 
+    // Stock controls receive HID contacts; no resizing, swizzling, synthesized
+    // mouse events, or private setters are used to manufacture an expansion.
+    private static func verifyAdaptiveControls(_ driver: TouchProbeDriver) async throws {
+        let observer = TouchControlObserver()
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 360))
+        let toggle = NSSwitch(frame: NSRect(x: 90, y: 160, width: 38, height: 24))
+        toggle.target = observer; toggle.action = #selector(TouchControlObserver.clicked)
+        let slider = NSSlider(value: 0.5, minValue: 0, maxValue: 1, target: observer, action: #selector(TouchControlObserver.clicked))
+        slider.frame = NSRect(x: 180, y: 158, width: 200, height: 28)
+        let stepper = NSStepper(frame: NSRect(x: 430, y: 155, width: 19, height: 32))
+        stepper.minValue = 0; stepper.maxValue = 10; stepper.doubleValue = 5
+        stepper.target = observer; stepper.action = #selector(TouchControlObserver.clicked)
+        [toggle, slider, stepper].forEach { root.addSubview($0) }
+        try await driver.install(root)
+        for (name, control) in [("NSSwitch", toggle as NSControl), ("NSSlider", slider as NSControl), ("NSStepper", stepper as NSControl)] {
+            let before = control.frame
+            let windowsBefore = Set(NSApplication.shared.windows.filter(\.isVisible).map(\.windowNumber))
+            let clicksBefore = observer.clicks
+            let valueBefore = control === toggle ? Double(toggle.state.rawValue) : control.doubleValue
+            let point = NSPoint(x: before.midX, y: control === stepper ? before.maxY - 6 : before.midY)
+            try await driver.send([point], phase: "began", delay: .milliseconds(250))
+            let during = control.frame
+            let newWindows = NSApplication.shared.windows.filter { $0.isVisible && !windowsBefore.contains($0.windowNumber) }
+            print("OBSERVE \(name) frameBefore=\(before) frameDuring=\(during) newVisibleWindows=\(newWindows.map { String(describing: type(of: $0)) })")
+            let end = control === slider ? NSPoint(x: point.x + 50, y: point.y) : point
+            if control === slider { try await driver.send([end], phase: "moved") }
+            try await driver.send([end], phase: "ended")
+            let valueAfter = control === toggle ? Double(toggle.state.rawValue) : control.doubleValue
+            guard observer.clicks > clicksBefore, valueAfter != valueBefore else {
+                throw HostFailure(message: "原生触摸未改变 \(name) 的值或触发 action。")
+            }
+            print("PASS native \(name) value \(valueBefore) -> \(valueAfter); expansion is observation only")
+        }
+    }
+
     static func run() {
         NSApplication.shared.setActivationPolicy(.regular)
         Task { @MainActor in
             do {
                 let extended = ProcessInfo.processInfo.arguments.contains("--extended")
                 let gestures = ProcessInfo.processInfo.arguments.contains("--gestures")
+                let adaptiveControls = ProcessInfo.processInfo.arguments.contains("--adaptive-controls")
+                print("RUNTIME \(ProcessInfo.processInfo.operatingSystemVersionString)")
                 if extended {
                     let display = try DesktopVirtualDisplay(width: 2560, height: 1600)
                     try await display.waitForHiDPIMode(width: 2560, height: 1600)
-                    try await verify(displayID: display.id, gestures: gestures)
+                    try await verify(displayID: display.id, gestures: gestures, adaptiveControls: adaptiveControls)
                     try display.resize(width: 1600, height: 2400)
                     try await display.waitForHiDPIMode(width: 1600, height: 2400)
-                    try await verify(displayID: display.id, gestures: gestures)
+                    try await verify(displayID: display.id, gestures: gestures, adaptiveControls: adaptiveControls)
                     withExtendedLifetime(display) {}
                     print("PASS extended display landscape and portrait")
-                } else { try await verify(gestures: gestures) }
-                print("PASS AppKit received multiple direct contacts with begin/move/end/cancel")
+                } else { try await verify(gestures: gestures, adaptiveControls: adaptiveControls) }
+                print(adaptiveControls ? "PASS AppKit native control actions; visual expansion is not asserted" : "PASS AppKit received multiple direct contacts with begin/move/end/cancel")
                 exit(0)
             } catch { fputs("FAIL \(error.localizedDescription)\n", stderr); exit(1) }
         }
