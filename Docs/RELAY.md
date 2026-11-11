@@ -15,6 +15,8 @@ relay 集合由服务端 `NETWORK_POLICY` 通过签名证书下发，不写入�
 
 Mac 证明可不含构建号，未知代码哈希拒绝接入；额外检查 `aclBlob`，要求 SIP 与完整安全模式。不支持证明或验证失败时拒绝，不降级到共享密钥。系统要求见[分发](DISTRIBUTION.md)。
 
+系统验证与网络暂时失败按 1、2、4 秒退避重试。密钥无效时在同次请求内最多重建一次；macOS 的持续 `unknownSystemFailure` 同样执行一次修复。服务端拒绝不会触发密钥重建，恢复仍须通过完整 App Attest 与端点证明。停止主机取消排队请求和后续重试。
+
 共享证明实现位于 `transport/apple/NetworkAdmission.swift`。Host 由签名外层 App 获取资格，经本机控制 socket 安装到后端。
 
 ## 接口与证书

@@ -4,6 +4,7 @@ import Observation
 @MainActor @Observable
 final class HostStore {
     private let admission = NetworkAdmission(role: "host")
+    private var startupAdmission: Task<NetworkAdmission.Lease, Error>?
     private var admissionTask: Task<Void, Never>?
     let process = HostProcess()
     let permissions = HostPermissionCenter()
@@ -48,7 +49,7 @@ final class HostStore {
         lifecycle = generation
         isStarting = true
         error = nil
-        defer { if lifecycle == generation { isStarting = false } }
+        defer { if lifecycle == generation { isStarting = false; startupAdmission = nil } }
         do {
             try process.start()
             for _ in 0..<60 {
@@ -59,18 +60,27 @@ final class HostStore {
                    let status = try? await client.request("host.status") {
                     guard lifecycle == generation, !Task.isCancelled else { return }
                     let secret = try Data(contentsOf: process.stateDirectory.appending(path: "identity.key"))
-                    let lease = try await admission.lease(secret: secret)
+                    let startup = Task { try await admission.lease(secret: secret) }
+                    startupAdmission = startup
+                    let lease = try await withTaskCancellationHandler {
+                        try await startup.value
+                    } onCancel: { startup.cancel() }
                     guard lifecycle == generation, !Task.isCancelled else { return }
                     _ = try await client.request("admission.install", body: .object(["token": .string(lease.token)]))
+                    guard lifecycle == generation, !Task.isCancelled else { return }
                     admissionTask = Task { [weak self] in
                         while !Task.isCancelled {
                             do {
                                 try await Task.sleep(for: .seconds(300))
                                 guard let self else { return }
                                 let renewed = try await self.admission.lease(secret: secret)
+                                guard self.lifecycle == generation, !Task.isCancelled else { return }
                                 _ = try await client.request("admission.install", body: .object(["token": .string(renewed.token)]))
                             } catch is CancellationError { return }
-                            catch { self?.error = error.localizedDescription }
+                            catch {
+                                guard let self, self.lifecycle == generation, !Task.isCancelled else { return }
+                                self.error = error.localizedDescription
+                            }
                         }
                     }
                     self.client = client
@@ -92,6 +102,8 @@ final class HostStore {
 
     func stop() {
         lifecycle = UUID()
+        startupAdmission?.cancel()
+        startupAdmission = nil
         admissionTask?.cancel()
         admissionTask = nil
         pollTask?.cancel()
